@@ -1,0 +1,74 @@
+[
+  {
+    "model": "hipchat.scope",
+    "pk": 1,
+    "fields": {
+      "name": "admin_group",
+      "description": "Perform group administrative tasks"
+    }
+  },
+  {
+    "model": "hipchat.scope",
+    "pk": 2,
+    "fields": {
+      "name": "admin_room",
+      "description": "Perform room administrative tasks"
+    }
+  },
+  {
+    "model": "hipchat.scope",
+    "pk": 3,
+    "fields": {
+      "name": "import_data",
+      "description": "Import users, rooms, and chat history. Only available for select add-ons."
+    }
+  },
+  {
+    "model": "hipchat.scope",
+    "pk": 4,
+    "fields": {
+      "name": "manage_rooms",
+      "description": "Create, update, and remove rooms"
+    }
+  },
+  {
+    "model": "hipchat.scope",
+    "pk": 5,
+    "fields": {
+      "name": "send_message",
+      "description": "Send private one-on-one messages"
+    }
+  },
+  {
+    "model": "hipchat.scope",
+    "pk": 6,
+    "fields": {
+      "name": "send_notification",
+      "description": "Send room notifications"
+    }
+  },
+  {
+    "model": "hipchat.scope",
+    "pk": 7,
+    "fields": {
+      "name": "view_group",
+      "description": "View users, rooms, and other group information"
+    }
+  },
+  {
+    "model": "hipchat.scope",
+    "pk": 8,
+    "fields": {
+      "name": "view_messages",
+      "description": "View messages from chat rooms and private chats you have access to"
+    }
+  },
+  {
+    "model": "hipchat.scope",
+    "pk": 9,
+    "fields": {
+      "name": "view_room",
+      "description": "View room information and participants, but not history"
+    }
+  }
+]
