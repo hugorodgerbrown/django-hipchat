@@ -4,10 +4,26 @@
 https://ecosystem.atlassian.net/wiki/display/HIPDEV/Server-side+installation+flow
 
 """
+import datetime
+from urlparse import urljoin
+
+import requests
+from requests.auth import HTTPBasicAuth
+
 from django.db import models
 from django.conf import settings
+from django.contrib.sites.models import Site
 from django.core.urlresolvers import reverse
 from django.utils.timezone import now as tz_now
+
+USE_SSL = getattr(settings, 'USE_SSL', True)
+
+
+def get_full_url(path):
+    """Return the full URL (scheme, domain, path) for a relative path."""
+    scheme = "https://" if USE_SSL else "http://"
+    domain = Site.objects.get_current().domain
+    return urljoin(scheme + domain, path)
 
 
 class Scope(models.Model):
@@ -98,20 +114,29 @@ class HipChatApp(models.Model):
         help_text=("Set to true if your addon can be installed in a room.")
     )
 
+    def __unicode__(self):
+        return self.key
+
+    def __str__(self):
+        return unicode(self).encode('utf-8')
+
+    def __repr__(self):
+        return u"<HipChatApp id=%s key='%s'>" % (self.id, self.key)
+
     @property
     def descriptor_url(self):
         """Format the fully-qualified URL for the descriptor."""
-        return reverse('hipchat:descriptor', kwargs={'id': self.id})
+        return get_full_url(reverse('hipchat:descriptor', kwargs={'app_id': self.id}))
 
     @property
     def install_url(self):
         """Format the fully-qualified URL for the descriptor."""
-        return reverse('hipchat:install', kwargs={'id': self.id})
+        return get_full_url(reverse('hipchat:install', kwargs={'app_id': self.id}))
 
     @property
     def scopes_list(self):
         """Return related scopes as a comma-separated string."""
-        return [s.name for s in self.scopes_set.all()]
+        return [s.name for s in self.scopes.all()]
 
     @property
     def descriptor(self):
@@ -132,11 +157,13 @@ class HipChatApp(models.Model):
                     "scopes": self.scopes_list
                 },
                 "installable": {
-                    "callbackUrl": self.install_url
+                    "callbackUrl": self.install_url,
+                    "allowGlobal": self.allow_global,
+                    "allowRoom": self.allow_room
                 },
             }
         }
-        descriptor['capabilities']['hipchatApiConsumer']['scopes']
+        return descriptor
 
     def save(self, *args, **kwargs):
         super(HipChatApp, self).save(*args, **kwargs)
@@ -161,12 +188,14 @@ class AppInstallQuerySet(models.query.QuerySet):
             json_data: a dict, the HipChat callback request POST contents.
 
         """
-        data = AppInstall(app=app)
-        data.oauth_id = data['oauthId']
-        data.oauth_secret = data['oauthSecret']
-        data.group_id = data['groupId']
-        data.room_id = data['roomId']
-        return data.save()
+        install = AppInstall(app=app)
+        install.oauth_id = json_data['oauthId']
+        install.oauth_secret = json_data['oauthSecret']
+        install.group_id = json_data['groupId']
+        if 'roomId' in json_data:
+            install.room_id = json_data['roomId']
+        # this will raise IntegrityError if the oauth_id is a duplicate
+        return install.save()
 
 
 class AppInstall(models.Model):
@@ -205,9 +234,11 @@ class AppInstall(models.Model):
         HipChatApp,
         help_text="App to which this access info belongs."
     )
+    # the following attrs are set by the install postback from HipChat
     oauth_id = models.CharField(
         max_length=20,
-        help_text="OAuth ID returned from the app install postback."
+        help_text="OAuth ID returned from the app install postback.",
+        unique=True
     )
     oauth_secret = models.CharField(
         max_length=20,
@@ -221,12 +252,13 @@ class AppInstall(models.Model):
         blank=True, null=True,
         help_text="Id of the room into which the app was installed."
     )
+    # the following attrs are set by posting to the token_url
     access_token = models.CharField(
         max_length=40,
         help_text="API access token",
         blank=True
     )
-    expires_in = models.DateTimeField(
+    expires_at = models.DateTimeField(
         blank=True, null=True,
         help_text="The datetime at which this access_token will expire."
     )
@@ -235,9 +267,44 @@ class AppInstall(models.Model):
         blank=True,
         help_text="Comma separated list of scopes."
     )
+    installed_at = models.DateTimeField(
+        help_text="Timestamp set when the app is installed."
+    )
 
     objects = AppInstallQuerySet.as_manager()
 
     def save(self, *args, **kwargs):
+        self.installed_at = self.installed_at or tz_now()
         super(AppInstall, self).save(*args, **kwargs)
         return self
+
+    @property
+    def has_expired(self):
+        """Return True if the token is passed its expires_at datetime."""
+        return self.expires_at < tz_now()
+
+    @property
+    def http_auth(self):
+        """Return HTTPBasicAuth object using oauth_id, secret."""
+        return HTTPBasicAuth(self.oauth_id, self.oauth_secret)
+
+    def refresh_access_token(self):
+        """Fetch a new access_token from HipChat for this install.
+
+        This method is used to fill in the second half of the app install
+        properties - including the access_token, which is the token used
+        when calling the HipChat API.
+
+        """
+        url = "https://api.hipchat.com/v2/oauth/token"
+        data = {'grant_type': 'client_credentials', 'scope': self.app.scopes_list}
+        resp = requests.post(url, auth=self.http_auth, data=data)
+        data = resp.json()
+        self.access_token = data['access_token']
+        self.group_id = data['group_id']
+        self.group_name = data['group_name']
+        self.scope = data['scope']
+        if 'roomId' in data:
+            self.room_id = data['roomId']
+        self.expires_at = tz_now() + datetime.timedelta(seconds=data['expires_in'])
+        return self.save()

@@ -15,6 +15,7 @@ INSTALLED_APPS = (
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'django.contrib.sites',
     'hipchat',
 )
 
@@ -33,5 +34,7 @@ ROOT_URLCONF = 'urls'
 APPEND_SLASH = True
 
 STATIC_URL = '/static/'
+
+SITE_ID = 1
 
 assert DEBUG is True, "This project is only intended to be used for testing."
