@@ -4,7 +4,7 @@ import json
 from django.contrib import admin
 from django.utils.safestring import mark_safe
 
-from hipchat.models import HipChatApp, AppInstall
+from hipchat.models import HipChatApp, AppInstall,  AccessToken
 
 
 class HipChatAppAdmin(admin.ModelAdmin):
@@ -43,26 +43,54 @@ class AppInstallAdmin(admin.ModelAdmin):
 
     list_display = (
         'app',
-        'oauth_id',
+        # 'access_token',
         'group_id',
         'room_id',
-        'expires_at',
-        'installed_at',
-        'has_expired'
+        # 'scope',
+        # 'expires_at',
+        # 'is_valid'
     )
     readonly_fields = (
         'app',
         'oauth_id',
         'oauth_secret',
         'group_id',
-        'access_token',
+        # 'access_token',
         'room_id',
-        'expires_at',
-        'scope',
+        # 'expires_at',
+        # 'scope',
         'installed_at'
     )
     actions = (refresh_access_tokens,)
 
 
+class AccessTokenAdmin(admin.ModelAdmin):
+
+    """Admin model of AccessToken objects."""
+
+    list_display = (
+        'app',
+        'install',
+        'token',
+        'group_name',
+        'room_id',
+        'scope',
+        'expires_at',
+        # 'is_valid'
+    )
+    # readonly_fields = (
+    #     'app',
+    #     'oauth_id',
+    #     'oauth_secret',
+    #     'group_id',
+    #     # 'access_token',
+    #     'room_id',
+    #     # 'expires_at',
+    #     # 'scope',
+    #     'installed_at'
+    # )
+    # actions = (refresh_access_tokens,)
+
 admin.site.register(HipChatApp, HipChatAppAdmin)
 admin.site.register(AppInstall, AppInstallAdmin)
+admin.site.register(AccessToken, AccessTokenAdmin)

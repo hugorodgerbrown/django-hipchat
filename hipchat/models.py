@@ -5,6 +5,8 @@ https://ecosystem.atlassian.net/wiki/display/HIPDEV/Server-side+installation+flo
 
 """
 import datetime
+import json
+import logging
 from urlparse import urljoin
 
 import requests
@@ -17,6 +19,8 @@ from django.core.urlresolvers import reverse
 from django.utils.timezone import now as tz_now
 
 USE_SSL = getattr(settings, 'USE_SSL', True)
+
+logger = logging.getLogger(__name__)
 
 
 def get_full_url(path):
@@ -136,7 +140,7 @@ class HipChatApp(models.Model):
     @property
     def scopes_list(self):
         """Return related scopes as a comma-separated string."""
-        return [s.name for s in self.scopes.all()]
+        return ' '.join([s.name for s in self.scopes.all()])
 
     @property
     def descriptor(self):
@@ -237,35 +241,21 @@ class AppInstall(models.Model):
     # the following attrs are set by the install postback from HipChat
     oauth_id = models.CharField(
         max_length=20,
-        help_text="OAuth ID returned from the app install postback.",
-        unique=True
+        help_text="Value returned from the app install postback.",
+        unique=True,
+        db_index=True
     )
     oauth_secret = models.CharField(
         max_length=20,
-        help_text="OAuth secret returned from the app install postback."
+        help_text="Value returned from the app install postback."
     )
     group_id = models.IntegerField(
         blank=True,
-        help_text="Name of the group, returned from the token URL."
+        help_text="Value returned from the app install postback."
     )
     room_id = models.IntegerField(
         blank=True, null=True,
-        help_text="Id of the room into which the app was installed."
-    )
-    # the following attrs are set by posting to the token_url
-    access_token = models.CharField(
-        max_length=40,
-        help_text="API access token",
-        blank=True
-    )
-    expires_at = models.DateTimeField(
-        blank=True, null=True,
-        help_text="The datetime at which this access_token will expire."
-    )
-    scope = models.CharField(
-        max_length=500,
-        blank=True,
-        help_text="Comma separated list of scopes."
+        help_text="Value returned from the app install postback."
     )
     installed_at = models.DateTimeField(
         help_text="Timestamp set when the app is installed."
@@ -279,9 +269,9 @@ class AppInstall(models.Model):
         return self
 
     @property
-    def has_expired(self):
-        """Return True if the token is passed its expires_at datetime."""
-        return self.expires_at < tz_now()
+    def is_valid(self):
+        """Return True if the token exists and has not yet expired."""
+        return self.expires_at is not None and self.expires_at > tz_now()
 
     @property
     def http_auth(self):
@@ -297,14 +287,89 @@ class AppInstall(models.Model):
 
         """
         url = "https://api.hipchat.com/v2/oauth/token"
-        data = {'grant_type': 'client_credentials', 'scope': self.app.scopes_list}
-        resp = requests.post(url, auth=self.http_auth, data=data)
-        data = resp.json()
-        self.access_token = data['access_token']
-        self.group_id = data['group_id']
-        self.group_name = data['group_name']
-        self.scope = data['scope']
-        if 'roomId' in data:
-            self.room_id = data['roomId']
-        self.expires_at = tz_now() + datetime.timedelta(seconds=data['expires_in'])
-        return self.save()
+        client_data = {'grant_type': 'client_credentials', 'scope': self.app.scopes_list}  # noqa
+        logger.debug("Requesting token: %s", json.dumps(client_data))
+        resp = requests.post(url, auth=self.http_auth, data=client_data)
+        resp_data = resp.json()
+        logger.debug("Token response: %s", json.dumps(resp_data))
+        return AccessToken.objects.create_token(self.app, self, resp_data)
+
+
+class AccessTokenQuerySet(models.query.QuerySet):
+
+    """Custom AccessToken QuerySet."""
+
+    def create_token(self, app, install, json_data):
+        """Create a new access token from HipChat JSON."""
+        token = AccessToken(app=app, install=install)
+        token.token = json_data['access_token']
+        token.group_id = json_data['group_id']
+        token.group_name = json_data['group_name']
+        token.scope = json_data['scope']
+        if 'roomId' in json_data:
+            token.room_id = json_data['roomId']
+        token.expires_at = tz_now() + datetime.timedelta(seconds=json_data['expires_in'])  # noqa
+        token.save()
+        return token
+
+
+class AccessToken(models.Model):
+
+    """Store specific access tokens, and their scopes."""
+    app = models.ForeignKey(
+        HipChatApp,
+        help_text="None if a personal token.",
+        blank=True, null=True
+    )
+    install = models.ForeignKey(
+        AppInstall,
+        help_text="None if a personal token.",
+        blank=True, null=True
+    )
+    group_id = models.IntegerField(
+        blank=True,
+        help_text="Value returned from the token request."
+    )
+    group_name = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text="Value returned from the token request."
+    )
+    room_id = models.IntegerField(
+        blank=True, null=True,
+        help_text="Value returned from the token request."
+    )
+    # the following attrs are set by posting to the token_url
+    token = models.CharField(
+        max_length=40,
+        help_text="Value returned from the token request.",
+        blank=True,
+        unique=True,
+        db_index=True
+    )
+    expires_at = models.DateTimeField(
+        blank=True, null=True,
+        help_text="The datetime at which this token will expire."
+    )
+    scope = models.CharField(
+        max_length=500,
+        blank=True,
+        help_text="List of scopes, returned from the token request."
+    )
+    created_at = models.DateTimeField()
+
+    objects = AccessTokenQuerySet.as_manager()
+
+    def __unicode__(self):
+        return u"%s" % self.token
+
+    def __str__(self):
+        return unicode(self).encode('utf-8')
+
+    def __repr__(self):
+        return u"<AccessToken id=%s token='%s'>" % (self.id, self.token)
+
+    def save(self, *args, **kwargs):
+        self.created_at = self.created_at or tz_now()
+        super(AccessToken, self).save(*args, **kwargs)
+        return self
