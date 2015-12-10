@@ -10,7 +10,7 @@ setup(
     name="django-hipchat",
     version="0.0.0",
     packages=find_packages(),
-    install_requires=['Django>=1.8'],
+    install_requires=['Django>=1.8', 'requests>=2.8.1'],
     include_package_data=True,
     description='Django app for making custom HipChat add-ons.',
     long_description=README,

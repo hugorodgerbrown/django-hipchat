@@ -36,7 +36,7 @@ def install(request, app_id):
     app = get_object_or_404(HipChatApp, id=app_id)
     data =json.loads(request.body)
     try:
-        install = AppInstall.objects.create_from_install(app, data)
+        install = AppInstall(app=app).parse_json(data).save()
         return HttpResponse("Thank you for installing our app", status=201)
     except IntegrityError:
         logger.warning("Duplicate HipChat app install oauthId value.")

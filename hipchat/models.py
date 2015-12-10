@@ -139,8 +139,13 @@ class HipChatApp(models.Model):
 
     @property
     def scopes_list(self):
-        """Return related scopes as a comma-separated string."""
-        return ' '.join([s.name for s in self.scopes.all()])
+        """Return related scopes as a list."""
+        return [s.name for s in self.scopes.all()]
+
+    @property
+    def scopes_string(self):
+        """Return related scopes as a space-separated string."""
+        return ' '.join(self.scopes_list)
 
     @property
     def descriptor(self):
@@ -174,34 +179,6 @@ class HipChatApp(models.Model):
         return self
 
 
-class AppInstallQuerySet(models.query.QuerySet):
-
-    """Custom AppInstall QuerySet."""
-
-    def create_from_install(self, app, json_data):
-        """Create a new AccessData object from JSON data.
-
-        This method handles the JSON posted back from the install.
-        https://ecosystem.atlassian.net/wiki/display/HIPDEV/Server-side+installation+flow
-
-        NB this will fail hard if the JSON is incorrectly formatted - this is
-        by design.
-
-        Args:
-            app: HipChatApp that this install relates to
-            json_data: a dict, the HipChat callback request POST contents.
-
-        """
-        install = AppInstall(app=app)
-        install.oauth_id = json_data['oauthId']
-        install.oauth_secret = json_data['oauthSecret']
-        install.group_id = json_data['groupId']
-        if 'roomId' in json_data:
-            install.room_id = json_data['roomId']
-        # this will raise IntegrityError if the oauth_id is a duplicate
-        return install.save()
-
-
 class AppInstall(models.Model):
 
     """Store data returned from the HipChat API re. an app install.
@@ -209,31 +186,8 @@ class AppInstall(models.Model):
     Specific information required for access rights - see
     https://ecosystem.atlassian.net/wiki/display/HIPDEV/Server-side+installation+flow
 
-    Returned from the initial install callback:
-
-        {
-             "capabilitiesUrl": "https://api.hipchat.com/v2/capabilities",
-             "oauthId": "abc",
-             "oauthSecret": "xyz",
-             "groupId": 123,
-             "roomId": "1234"
-        }
-
-    The capabilitiesUrl returns a JSON document containing all the URLs used to
-    interact with the API. One of these is the `tokenUrl` - which is used in
-    conjunction with the oauth creds returned in the callback to generate an
-    API access token:
-
-        { 
-          access_token: '5236346233724572457245gdgreyt345yreg',
-          expires_in: 431999999,
-          group_id: 123,
-          group_name: 'Example Company',
-          scope: 'send_notification',
-          token_type: 'bearer' 
-        }
-
     """
+
     app = models.ForeignKey(
         HipChatApp,
         help_text="App to which this access info belongs."
@@ -261,7 +215,14 @@ class AppInstall(models.Model):
         help_text="Timestamp set when the app is installed."
     )
 
-    objects = AppInstallQuerySet.as_manager()
+    def __unicode__(self):
+        return u"%s (%s)" % (self.app, self.oauth_id)
+
+    def __str__(self):
+        return unicode(self).encode('utf-8')
+
+    def __repr__(self):
+        return u"<AppInstall id=%s app=%s>" % (self.id, self.app.id)
 
     def save(self, *args, **kwargs):
         self.installed_at = self.installed_at or tz_now()
@@ -269,16 +230,34 @@ class AppInstall(models.Model):
         return self
 
     @property
-    def is_valid(self):
-        """Return True if the token exists and has not yet expired."""
-        return self.expires_at is not None and self.expires_at > tz_now()
-
-    @property
     def http_auth(self):
         """Return HTTPBasicAuth object using oauth_id, secret."""
         return HTTPBasicAuth(self.oauth_id, self.oauth_secret)
 
-    def refresh_access_token(self):
+    def parse_json(self, json_data):
+        """Set object properties from the HipChat API callback JSON.
+
+        The callback POSTs JSON that looks like this:
+
+        {
+            "capabilitiesUrl": "https://api.hipchat.com/v2/capabilities",
+            "oauthId": "abc",
+            "oauthSecret": "xyz",
+            "groupId": 123,
+            "roomId": "1234"
+        }
+
+        NB this method doesn't save the object.
+
+        """
+        self.oauth_id = json_data['oauthId']
+        self.oauth_secret = json_data['oauthSecret']
+        self.group_id = json_data['groupId']
+        if 'roomId' in json_data:
+            self.room_id = json_data['roomId']
+        return self
+
+    def get_access_token(self):
         """Fetch a new access_token from HipChat for this install.
 
         This method is used to fill in the second half of the app install
@@ -287,30 +266,14 @@ class AppInstall(models.Model):
 
         """
         url = "https://api.hipchat.com/v2/oauth/token"
-        client_data = {'grant_type': 'client_credentials', 'scope': self.app.scopes_list}  # noqa
+        client_data = {'grant_type': 'client_credentials', 'scope': self.app.scopes_string}  # noqa
         logger.debug("Requesting token: %s", json.dumps(client_data))
         resp = requests.post(url, auth=self.http_auth, data=client_data)
         resp_data = resp.json()
         logger.debug("Token response: %s", json.dumps(resp_data))
-        return AccessToken.objects.create_token(self.app, self, resp_data)
-
-
-class AccessTokenQuerySet(models.query.QuerySet):
-
-    """Custom AccessToken QuerySet."""
-
-    def create_token(self, app, install, json_data):
-        """Create a new access token from HipChat JSON."""
-        token = AccessToken(app=app, install=install)
-        token.token = json_data['access_token']
-        token.group_id = json_data['group_id']
-        token.group_name = json_data['group_name']
-        token.scope = json_data['scope']
-        if 'roomId' in json_data:
-            token.room_id = json_data['roomId']
-        token.expires_at = tz_now() + datetime.timedelta(seconds=json_data['expires_in'])  # noqa
-        token.save()
-        return token
+        token = AccessToken(app=self.app, install=self)
+        token.parse_json(resp_data)
+        return token.save()
 
 
 class AccessToken(models.Model):
@@ -328,21 +291,16 @@ class AccessToken(models.Model):
     )
     group_id = models.IntegerField(
         blank=True,
-        help_text="Value returned from the token request."
+        help_text="The HipChat group ID this token belongs to"
     )
     group_name = models.CharField(
         max_length=100,
         blank=True,
-        help_text="Value returned from the token request."
+        help_text="The HipChat group name this token belongs to."
     )
-    room_id = models.IntegerField(
-        blank=True, null=True,
-        help_text="Value returned from the token request."
-    )
-    # the following attrs are set by posting to the token_url
-    token = models.CharField(
+    access_token = models.CharField(
         max_length=40,
-        help_text="Value returned from the token request.",
+        help_text="The generated access token to use to authenticate future requests.",
         blank=True,
         unique=True,
         db_index=True
@@ -354,22 +312,66 @@ class AccessToken(models.Model):
     scope = models.CharField(
         max_length=500,
         blank=True,
-        help_text="List of scopes, returned from the token request."
+        help_text="A space-delimited list of scopes that this token is allowed to use."
     )
-    created_at = models.DateTimeField()
-
-    objects = AccessTokenQuerySet.as_manager()
+    created_at = models.DateTimeField(
+        help_text="Set when this object is first saved."
+    )
 
     def __unicode__(self):
-        return u"%s" % self.token
+        return u"%s" % self.access_token
 
     def __str__(self):
         return unicode(self).encode('utf-8')
 
     def __repr__(self):
-        return u"<AccessToken id=%s token='%s'>" % (self.id, self.token)
+        return u"<AccessToken id=%s token='%s'>" % (self.id, self.access_token)
 
     def save(self, *args, **kwargs):
         self.created_at = self.created_at or tz_now()
         super(AccessToken, self).save(*args, **kwargs)
+        return self
+
+    @property
+    def has_expired(self):
+        """Return True if the token has gone past its expiry date."""
+        return self.expires_at < tz_now()
+
+    # included for API completeness only
+    @property
+    def token_type(self):
+        return 'bearer'
+
+    def set_expiry(self, seconds):
+        """Set the expires_at value a number of seconds into the future.
+
+        NB This method does *not* save the object.
+
+        """
+        self.expires_at = tz_now() + datetime.timedelta(seconds=seconds) 
+
+    def parse_json(self, json_data):
+        """Set object properties from the token API response data.
+
+        https://www.hipchat.com/docs/apiv2/method/generate_token
+
+        This is a sample:
+
+        { 
+          access_token: '5236346233724572457245gdgreyt345yreg',
+          expires_in: 431999999,
+          group_id: 123,
+          group_name: 'Example Company',
+          scope: 'send_notification',
+          token_type: 'bearer'
+        }
+
+        NB This method does not save the object.
+
+        """
+        self.access_token = json_data['access_token']
+        self.group_id = json_data['group_id']
+        self.group_name = json_data['group_name']
+        self.scope = json_data['scope']
+        self.set_expiry(json_data['expires_in'])
         return self

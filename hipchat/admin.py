@@ -31,11 +31,12 @@ class HipChatAppAdmin(admin.ModelAdmin):
         return mark_safe("<code>%s</code>" % pretty.replace(" ", "&nbsp;"))
 
 
-def refresh_access_tokens(modeladmin, request, queryset):
+def get_access_tokens(modeladmin, request, queryset):
     """Refresh API access tokens for selected installs."""
     for obj in queryset:
-        obj.refresh_access_token()
-refresh_access_tokens.short_description = "Refresh selected app install access tokens."
+        obj.get_access_token()
+
+get_access_tokens.short_description = "Get access tokens for selected installs."
 
 class AppInstallAdmin(admin.ModelAdmin):
 
@@ -43,25 +44,18 @@ class AppInstallAdmin(admin.ModelAdmin):
 
     list_display = (
         'app',
-        # 'access_token',
         'group_id',
         'room_id',
-        # 'scope',
-        # 'expires_at',
-        # 'is_valid'
     )
     readonly_fields = (
         'app',
         'oauth_id',
         'oauth_secret',
         'group_id',
-        # 'access_token',
         'room_id',
-        # 'expires_at',
-        # 'scope',
         'installed_at'
     )
-    actions = (refresh_access_tokens,)
+    actions = (get_access_tokens,)
 
 
 class AccessTokenAdmin(admin.ModelAdmin):
@@ -71,25 +65,22 @@ class AccessTokenAdmin(admin.ModelAdmin):
     list_display = (
         'app',
         'install',
-        'token',
+        'access_token',
         'group_name',
-        'room_id',
         'scope',
         'expires_at',
-        # 'is_valid'
+        'has_expired'
     )
-    # readonly_fields = (
-    #     'app',
-    #     'oauth_id',
-    #     'oauth_secret',
-    #     'group_id',
-    #     # 'access_token',
-    #     'room_id',
-    #     # 'expires_at',
-    #     # 'scope',
-    #     'installed_at'
-    # )
-    # actions = (refresh_access_tokens,)
+    readonly_fields = (
+        'app',
+        'install',
+        'group_id',
+        'group_name',
+        'access_token',
+        'expires_at',
+        'created_at',
+        'scope',
+    )
 
 admin.site.register(HipChatApp, HipChatAppAdmin)
 admin.site.register(AppInstall, AppInstallAdmin)
