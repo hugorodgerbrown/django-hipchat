@@ -172,6 +172,7 @@ class HipChatApp(models.Model):
                 },
             }
         }
+        descriptor['glance'] = [g.descriptor for g in self.glances.all()]
         return descriptor
 
     def save(self, *args, **kwargs):
@@ -375,3 +376,56 @@ class AccessToken(models.Model):
         self.scope = json_data['scope']
         self.set_expiry(json_data['expires_in'])
         return self
+
+
+class Glance(models.Model):
+
+    """HipChat glance descriptor."""
+
+    app = models.ForeignKey(
+        HipChatApp,
+        help_text="The app this glance belongs to.",
+        related_name='glances'
+    )
+    key = models.CharField(
+        max_length=40,
+        help_text="Unique key (in the context of the integration) to identify this glance."
+    )
+    name = models.CharField(
+        max_length=100,
+        help_text="The display name of the glance.",
+        blank=True
+    )
+
+    def __unicode__(self):
+        return u"%s" % self.key
+
+    def __str__(self):
+        return unicode(self).encode('utf-8')
+
+    def __repr__(self):
+        return u"<Glance id=%s key='%s'>" % (self.id, self.key)
+
+    def get_absolute_url(self):
+        return reverse('hipchat:glance', kwargs={'glance_id': self.id})
+
+    def get_full_url(self):
+        """Return full URL - including scheme and domain."""    
+        return get_full_url(self.get_absolute_url())
+
+    def save(self, *args, **kwargs):
+        super(Glance, self).save(*args, **kwargs)
+        return self
+
+    @property
+    def descriptor(self):
+        """Return JSON descriptor for the Glance."""
+        descriptor = {
+            "name": {
+                "value": self.name
+            },
+            "queryUrl": self.get_full_url(),
+            "key": self.key,
+            "target": "foo"
+        }
+        return descriptor

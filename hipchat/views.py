@@ -10,7 +10,7 @@ from django.shortcuts import get_object_or_404
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
-from hipchat.models import HipChatApp, AppInstall
+from hipchat.models import HipChatApp, AppInstall, Glance
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +54,35 @@ def delete(request, app_id, oauth_id):
     a 404 if the AppInstall doesn't exist.
 
     """
-    app = get_object_or_404(AppInstall, app_id=app_id, oauth_id=oauth_id)
-    app.delete()
+    install = get_object_or_404(AppInstall, app_id=app_id, oauth_id=oauth_id)
+    install.delete()
     return HttpResponse("Sorry to see you go :-(", status=204)
+
+
+@require_http_methods(['GET'])
+def glance(request, glance_id):
+    """Return initial glance data for the app
+
+    https://ecosystem.atlassian.net/wiki/display/HIPDEV/HipChat+Glances
+
+    """
+    glance = get_object_or_404(Glance, id=glance_id)
+    data = {
+        "label": {
+            "type": "html",
+            "value": "<b>4</b> Open Briefs"
+        },
+        "status": {
+            "type": "lozenge",
+            "value": {
+                "label": "LOCKED",
+                "type": "current"
+            }
+        },
+        "metadata": {
+            "customData": {
+                "customAttr": "customValue"
+            }
+        }
+    }
+    return JsonResponse(data)

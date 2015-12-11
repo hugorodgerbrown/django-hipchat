@@ -4,7 +4,7 @@ import json
 from django.contrib import admin
 from django.utils.safestring import mark_safe
 
-from hipchat.models import HipChatApp, AppInstall,  AccessToken
+from hipchat.models import HipChatApp, AppInstall,  AccessToken, Glance
 
 
 class HipChatAppAdmin(admin.ModelAdmin):
@@ -82,6 +82,19 @@ class AccessTokenAdmin(admin.ModelAdmin):
         'scope',
     )
 
+
+class GlanceAdmin(admin.ModelAdmin):
+
+    """Admin model of Glance objects."""
+
+    list_display = (
+        'app',
+        'key',
+        'name',
+    )
+
+
 admin.site.register(HipChatApp, HipChatAppAdmin)
 admin.site.register(AppInstall, AppInstallAdmin)
 admin.site.register(AccessToken, AccessTokenAdmin)
+admin.site.register(Glance, GlanceAdmin)
