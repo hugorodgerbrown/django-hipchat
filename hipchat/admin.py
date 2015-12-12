@@ -4,10 +4,25 @@ import json
 from django.contrib import admin
 from django.utils.safestring import mark_safe
 
-from hipchat.models import HipChatApp, AppInstall,  AccessToken, Glance
+from hipchat.models import HipChatApp, AppInstall, AccessToken, Glance, GlanceData
 
 
-class HipChatAppAdmin(admin.ModelAdmin):
+class DescriptorMixin(object):
+
+    def pretty_descriptor(self, obj):
+        """Return pretty formatted version of descriptor() output."""
+        pretty = json.dumps(
+            obj.descriptor(),
+            sort_keys=True,
+            indent=4,
+            separators=(',', ': ')
+        )
+        return mark_safe("<code>%s</code>" % pretty.replace(" ", "&nbsp;"))
+
+    pretty_descriptor.short_description = "Descriptor (formatted)"
+
+
+class HipChatAppAdmin(DescriptorMixin, admin.ModelAdmin):
 
     """Admin model for HipChatApp objects."""
 
@@ -18,17 +33,7 @@ class HipChatAppAdmin(admin.ModelAdmin):
         'allow_global',
         'allow_room'
     )
-    readonly_fields = ('app_descriptor',)
-
-    def app_descriptor(self, obj):
-        """Return formatted JSON."""
-        pretty = json.dumps(
-            obj.descriptor,
-            sort_keys=True,
-            indent=4,
-            separators=(',', ': ')
-        )
-        return mark_safe("<code>%s</code>" % pretty.replace(" ", "&nbsp;"))
+    readonly_fields = ('pretty_descriptor',)
 
 
 def get_access_tokens(modeladmin, request, queryset):
@@ -37,6 +42,7 @@ def get_access_tokens(modeladmin, request, queryset):
         obj.get_access_token()
 
 get_access_tokens.short_description = "Get access tokens for selected installs."
+
 
 class AppInstallAdmin(admin.ModelAdmin):
 
@@ -83,7 +89,7 @@ class AccessTokenAdmin(admin.ModelAdmin):
     )
 
 
-class GlanceAdmin(admin.ModelAdmin):
+class GlanceAdmin(DescriptorMixin, admin.ModelAdmin):
 
     """Admin model of Glance objects."""
 
@@ -92,9 +98,35 @@ class GlanceAdmin(admin.ModelAdmin):
         'key',
         'name',
     )
+    readonly_fields = ('pretty_descriptor',)
 
+
+class GlanceDataAdmin(admin.ModelAdmin):
+
+    """Admin model of Glance objects."""
+
+    list_display = (
+        'glance',
+        'label_value',
+        'lozenge',
+        'icon'
+    )
+
+    def lozenge(self, obj):
+        if obj.has_lozenge:
+            return u"(%s) %s" % (obj.lozenge_type, obj.lozenge_value)
+        else:
+            return None
+
+    def icon(self, obj):
+        """Display the icon in the list view."""
+        if obj.has_icon:
+            return mark_safe("<img src='%s'>" % obj.icon_url)
+        else:
+            return None
 
 admin.site.register(HipChatApp, HipChatAppAdmin)
 admin.site.register(AppInstall, AppInstallAdmin)
 admin.site.register(AccessToken, AccessTokenAdmin)
 admin.site.register(Glance, GlanceAdmin)
+admin.site.register(GlanceData, GlanceDataAdmin)

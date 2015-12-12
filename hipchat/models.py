@@ -18,16 +18,40 @@ from django.contrib.sites.models import Site
 from django.core.urlresolvers import reverse
 from django.utils.timezone import now as tz_now
 
-USE_SSL = getattr(settings, 'USE_SSL', True)
+SCHEME = "https://" if getattr(settings, 'USE_SSL', True) else "http://"
 
 logger = logging.getLogger(__name__)
 
 
+def get_domain():
+    """Return the current domain as specified in the Sites app.
+
+    This has been pulled out into a function to make it easy to mock
+    out in tests.
+
+    """
+    return Site.objects.get_current().domain
+
+
 def get_full_url(path):
     """Return the full URL (scheme, domain, path) for a relative path."""
-    scheme = "https://" if USE_SSL else "http://"
-    domain = Site.objects.get_current().domain
-    return urljoin(scheme + domain, path)
+    return urljoin(SCHEME + get_domain(), path)
+
+
+def request_access_token(install):
+    """Request access token from API.
+
+    Pulled out as a function to allow for mocking.
+
+    Args:
+        install: an AppInstall object for which we are requesting a token.
+
+    Returns the output from requests.post(...).json()
+
+    """
+    url = "https://api.hipchat.com/v2/oauth/token"
+    resp = requests.post(url, auth=install.http_auth(), data=install.token_request_data())
+    return resp.json()
 
 
 class Scope(models.Model):
@@ -40,6 +64,7 @@ class Scope(models.Model):
     https://ecosystem.atlassian.net/wiki/display/HIPDEV/API+scopes
 
     """
+
     name = models.CharField(
         max_length=25,
         help_text="The name of the scope as required by HipChat."
@@ -48,6 +73,7 @@ class Scope(models.Model):
         max_length=100,
         help_text="The capabilities allowed within this scope."
     )
+
     def __unicode__(self):
         return self.name
 
@@ -55,10 +81,10 @@ class Scope(models.Model):
         return unicode(self).encode('utf-8')
 
     def __repr__(self):
-        return u"<ApiScope id=%s name='%s'>" % (self.id, self.name)
+        return "<Scope id=%s name='%s'>" % (self.id, self.name.encode('utf-8'))
 
     def save(self, *args, **kwargs):
-        super(HipChatApp, self).save(*args, **kwargs)
+        super(Scope, self).save(*args, **kwargs)
         return self
 
 
@@ -125,31 +151,35 @@ class HipChatApp(models.Model):
         return unicode(self).encode('utf-8')
 
     def __repr__(self):
-        return u"<HipChatApp id=%s key='%s'>" % (self.id, self.key)
+        return "<HipChatApp id=%s key='%s'>" % (self.id, self.key.encode('utf-8'))
 
-    @property
+    def get_absolute_url(self):
+        return reverse('hipchat:descriptor', kwargs={'app_id': self.id})
+
     def descriptor_url(self):
         """Format the fully-qualified URL for the descriptor."""
-        return get_full_url(reverse('hipchat:descriptor', kwargs={'app_id': self.id}))
+        if self.id is None:
+            return None
+        return get_full_url(self.get_absolute_url())
 
-    @property
     def install_url(self):
         """Format the fully-qualified URL for the descriptor."""
+        if self.id is None:
+            return None
         return get_full_url(reverse('hipchat:install', kwargs={'app_id': self.id}))
 
-    @property
-    def scopes_list(self):
+    def scopes_as_list(self):
         """Return related scopes as a list."""
-        return [s.name for s in self.scopes.all()]
+        return sorted([s.name for s in self.scopes.all()])
 
-    @property
-    def scopes_string(self):
+    def scopes_as_string(self):
         """Return related scopes as a space-separated string."""
-        return ' '.join(self.scopes_list)
+        return ' '.join(self.scopes_as_list())
 
-    @property
     def descriptor(self):
         """Return the object formatted as the HipChat add-on descriptor."""
+        if self.id is None:
+            return None
         descriptor = {
             "key": self.key,
             "name": self.name,
@@ -159,20 +189,21 @@ class HipChatApp(models.Model):
                 "url": self.vendor_url
             },
             "links": {
-                "self": self.descriptor_url,
+                "self": self.descriptor_url(),
             },
             "capabilities": {
                 "hipchatApiConsumer": {
-                    "scopes": self.scopes_list
+                    "scopes": self.scopes_as_list()
                 },
                 "installable": {
-                    "callbackUrl": self.install_url,
+                    "callbackUrl": self.install_url(),
                     "allowGlobal": self.allow_global,
                     "allowRoom": self.allow_room
                 },
-            }
+            },
         }
-        descriptor['glance'] = [g.descriptor for g in self.glances.all()]
+        if self.glances.exists():
+            descriptor["glance"] = [g.descriptor() for g in self.glances.all()]
         return descriptor
 
     def save(self, *args, **kwargs):
@@ -230,7 +261,6 @@ class AppInstall(models.Model):
         super(AppInstall, self).save(*args, **kwargs)
         return self
 
-    @property
     def http_auth(self):
         """Return HTTPBasicAuth object using oauth_id, secret."""
         return HTTPBasicAuth(self.oauth_id, self.oauth_secret)
@@ -258,6 +288,13 @@ class AppInstall(models.Model):
             self.room_id = json_data['roomId']
         return self
 
+    def token_request_data(self):
+        """Return JSON data for POSTing to token request API."""
+        return {
+            'grant_type': 'client_credentials',
+            'scope': self.app.scopes_as_string()
+        }
+
     def get_access_token(self):
         """Fetch a new access_token from HipChat for this install.
 
@@ -266,20 +303,16 @@ class AppInstall(models.Model):
         when calling the HipChat API.
 
         """
-        url = "https://api.hipchat.com/v2/oauth/token"
-        client_data = {'grant_type': 'client_credentials', 'scope': self.app.scopes_string}  # noqa
-        logger.debug("Requesting token: %s", json.dumps(client_data))
-        resp = requests.post(url, auth=self.http_auth, data=client_data)
-        resp_data = resp.json()
-        logger.debug("Token response: %s", json.dumps(resp_data))
+        token_data = request_access_token(self)
         token = AccessToken(app=self.app, install=self)
-        token.parse_json(resp_data)
+        token.parse_json(token_data)
         return token.save()
 
 
 class AccessToken(models.Model):
 
     """Store specific access tokens, and their scopes."""
+
     app = models.ForeignKey(
         HipChatApp,
         help_text="None if a personal token.",
@@ -349,7 +382,7 @@ class AccessToken(models.Model):
         NB This method does *not* save the object.
 
         """
-        self.expires_at = tz_now() + datetime.timedelta(seconds=seconds) 
+        self.expires_at = tz_now() + datetime.timedelta(seconds=seconds)
 
     def parse_json(self, json_data):
         """Set object properties from the token API response data.
@@ -358,7 +391,7 @@ class AccessToken(models.Model):
 
         This is a sample:
 
-        { 
+        {
           access_token: '5236346233724572457245gdgreyt345yreg',
           expires_in: 431999999,
           group_id: 123,
@@ -396,6 +429,15 @@ class Glance(models.Model):
         help_text="The display name of the glance.",
         blank=True
     )
+    data_url = models.URLField(
+        blank=True,
+        help_text=("REST endpoint exposed by the add-on for Glance data.")
+    )
+    target = models.CharField(
+        max_length="40",
+        blank=True,
+        help_text="The key of a sidebar web panel, dialog or external page."
+    )
 
     def __unicode__(self):
         return u"%s" % self.key
@@ -409,23 +451,139 @@ class Glance(models.Model):
     def get_absolute_url(self):
         return reverse('hipchat:glance', kwargs={'glance_id': self.id})
 
-    def get_full_url(self):
-        """Return full URL - including scheme and domain."""    
-        return get_full_url(self.get_absolute_url())
+    @property
+    def query_url(self):
+        """Return full URL - including scheme and domain."""
+        if self.data_url == '':
+            return get_full_url(self.get_absolute_url())
+        else:
+            return self.data_url
 
     def save(self, *args, **kwargs):
         super(Glance, self).save(*args, **kwargs)
         return self
 
-    @property
     def descriptor(self):
         """Return JSON descriptor for the Glance."""
         descriptor = {
             "name": {
                 "value": self.name
             },
-            "queryUrl": self.get_full_url(),
+            "queryUrl": self.query_url,
             "key": self.key,
-            "target": "foo"
+            "target": self.target
         }
         return descriptor
+
+
+class GlanceData(models.Model):
+
+    """Container for Glance data response.
+
+    This is stored as an object so that we can contain a complete,
+    centralised, record of all glance updates. If it gets out of hand,
+    truncate the table.
+
+    https://ecosystem.atlassian.net/wiki/display/HIPDEV/HipChat+Glances
+
+    """
+
+    LOZENGE_EMPTY = 'empty'
+    LOZENGE_DEFAULT = 'default'
+    LOZENGE_SUCCESS = 'success'
+    LOZENGE_CURRENT = 'current'
+    LOZENGE_COMPLETE = 'complete'
+    LOZENGE_ERROR = 'error'
+    LOZENGE_NEW = 'new'
+    LOZENGE_MOVED = 'moved'
+
+    LOZENGE_CHOICES = (
+        (LOZENGE_EMPTY, 'no lozenge'),
+        (LOZENGE_DEFAULT, 'default'),
+        (LOZENGE_SUCCESS, ' success'),
+        (LOZENGE_CURRENT, ' current'),
+        (LOZENGE_COMPLETE, 'complete'),
+        (LOZENGE_ERROR, 'error'),
+        (LOZENGE_NEW, 'new'),
+        (LOZENGE_MOVED, 'moved')
+    )
+
+    glance = models.ForeignKey(
+        Glance,
+        help_text="The Glance that this data updated."
+    )
+    # fixed const - may change in future
+    label_type = 'html'
+    label_value = models.CharField(
+        max_length=1000,
+        help_text="HTML displayed in the glance body."
+    )
+    lozenge_type = models.CharField(
+        max_length=10,
+        choices=LOZENGE_CHOICES,
+        default=LOZENGE_EMPTY
+    )
+    lozenge_value = models.CharField(
+        max_length=20,
+        blank=True,
+        help_text="Text displayed inside the lozenge."
+    )
+    icon_url = models.URLField(
+        blank=True,
+        help_text="URL to icon displayed on the right of the glance."
+    )
+    icon_url2 = models.URLField(
+        blank=True,
+        help_text="URL to hi-res icon displayed on the right of the glance."
+    )
+    metadata = models.TextField(
+        blank=True,
+        help_text="Arbitrary JSON sent as the metadata value."
+    )
+
+    class Meta:
+        verbose_name = "Glance data"
+
+    @property
+    def has_lozenge(self):
+        return self.lozenge_type != GlanceData.LOZENGE_EMPTY
+
+    @property
+    def has_icon(self):
+        return self.icon_url not in (None, '')
+
+    def save(self, *args, **kwargs):
+        super(GlanceData, self).save(*args, **kwargs)
+        return self
+
+    def label(self):
+        """Return the glance label as JSON."""
+        return {'type': self.label_type, 'value': self.label_value}
+
+    def status(self):
+        """Return the glance status as JSON."""
+        if self.has_lozenge:
+            return {
+                'type': 'lozenge',
+                'value': {
+                    'type': self.lozenge_type,
+                    'label': self.lozenge_value
+                }
+            }
+        elif self.has_icon:
+            return {
+                'type': 'icon',
+                'value': {
+                    'url': self.icon_url,
+                    'url@2x': self.icon_url2
+                }
+            }
+        return {}
+
+    def content(self):
+        """Return the JSON data to be posted to the API."""
+        return {
+            'status': self.status(),
+            'label': self.label(),
+            'metadata': self.metadata
+        }

@@ -1,144 +1,260 @@
-# # -*- coding: utf-8 -*-
-# import datetime
+# -*- coding: utf-8 -*-
+import mock
+import random
 
-# from django.contrib.auth import get_user_model
-# from django.test import TransactionTestCase
+from django.contrib.sites.models import Site
+from django.core.urlresolvers import reverse
+from django.test import TestCase, TransactionTestCase
 
-# from net_promoter_score.models import UserScore, score_group
-
-
-# class UserScoreModelTests(TransactionTestCase):
-
-#     def setUp(self):
-#         self.user = get_user_model().objects.create_user('zoidberg')
-#         self.user2 = get_user_model().objects.create_user('nixon')
-
-#     def test_defaults(self):
-#         score = UserScore(user=self.user)
-#         self.assertEqual(score.user, self.user)
-#         self.assertEqual(score.timestamp, None)
-#         self.assertEqual(score.score, -1)
-#         self.assertEqual(score.reason, "")
-#         self.assertEqual(score.source, "")
-#         self.assertEqual(score.group, UserScore.GROUP_UNKNOWN)
-#         score.save()
-#         self.assertIsNotNone(score.timestamp)
-#         # confirm that the group is recalculated correctly
-#         score.score = 1
-#         score.save()
-#         self.assertEqual(score.group, UserScore.GROUP_DETRACTOR)
-
-#     def test_strings(self):
-#         unicode_username = u"åß∂ƒ©˙∆˚"
-#         self.user.username = unicode_username
-#         self.user.save()
-#         score = UserScore(user=self.user, score=10)
-#         self.assertIsNotNone(unicode(score))
-#         self.assertIsNotNone(str(score))
-#         self.assertIsNotNone(repr(score))
-#         score.save()
-#         self.assertIsNotNone(unicode(score))
-#         self.assertIsNotNone(str(score))
-#         self.assertIsNotNone(repr(score))
-
-#     def test_functions(self):
-#         self.assertRaises(AssertionError, score_group, None)
-#         self.assertRaises(AssertionError, score_group, "None")
-#         self.assertRaises(AssertionError, score_group, -2)
-#         self.assertRaises(AssertionError, score_group, 11)
-#         vals = (
-#             (-1, UserScore.GROUP_UNKNOWN),
-#             (0, UserScore.GROUP_DETRACTOR),
-#             (1, UserScore.GROUP_DETRACTOR),
-#             (2, UserScore.GROUP_DETRACTOR),
-#             (3, UserScore.GROUP_DETRACTOR),
-#             (4, UserScore.GROUP_DETRACTOR),
-#             (5, UserScore.GROUP_DETRACTOR),
-#             (6, UserScore.GROUP_DETRACTOR),
-#             (7, UserScore.GROUP_NEUTRAL),
-#             (8, UserScore.GROUP_NEUTRAL),
-#             (9, UserScore.GROUP_PROMOTER),
-#             (10, UserScore.GROUP_PROMOTER),
-#         )
-#         for val, group in vals:
-#             self.assertEqual(score_group(val), group)
+from hipchat.models import (
+    Scope,
+    HipChatApp,
+    AppInstall,
+    AccessToken,
+    Glance,
+    get_full_url,
+    get_domain,
+    request_access_token,
+    SCHEME
+)
 
 
-# class UserScoreQuerySetTests(TransactionTestCase):
+class MockResponse(object):
 
-#     def setUp(self):
-#         self.user = get_user_model().objects.create_user('zoidberg')
-#         self.psX = UserScore(user=self.user, score=-1).save()
-#         self.ps0 = UserScore(user=self.user, score=0).save()
-#         self.ps1 = UserScore(user=self.user, score=1).save()
-#         self.ps2 = UserScore(user=self.user, score=2).save()
-#         self.ps3 = UserScore(user=self.user, score=3).save()
-#         self.ps4 = UserScore(user=self.user, score=4).save()
-#         self.ps5 = UserScore(user=self.user, score=5).save()
-#         self.ps6 = UserScore(user=self.user, score=6).save()
-#         self.ps7 = UserScore(user=self.user, score=7).save()
-#         self.ps8 = UserScore(user=self.user, score=8).save()
-#         self.ps9 = UserScore(user=self.user, score=9).save()
-#         self.ps10 = UserScore(user=self.user, score=10).save()
+    """Mock used to fake the requests reponse object."""
 
-#     def test_detractors(self):
-#         detractors = UserScore.objects.detractors()
-#         self.assertEqual(detractors.count(), 7)
-#         self.assertTrue(self.ps0 in detractors)
-#         self.assertTrue(self.ps1 in detractors)
-#         self.assertTrue(self.ps2 in detractors)
-#         self.assertTrue(self.ps3 in detractors)
-#         self.assertTrue(self.ps4 in detractors)
-#         self.assertTrue(self.ps5 in detractors)
-#         self.assertTrue(self.ps6 in detractors)
+    def json(self):
+        return {'hello': 'world'}
 
-#     def test_neutrals(self):
-#         neutrals = UserScore.objects.neutrals()
-#         self.assertEqual(neutrals.count(), 2)
-#         self.assertTrue(self.ps7 in neutrals)
-#         self.assertTrue(self.ps8 in neutrals)
 
-#     def test_promoters(self):
-#         promoters = UserScore.objects.promoters()
-#         self.assertEqual(promoters.count(), 2)
-#         self.assertTrue(self.ps9 in promoters)
-#         self.assertTrue(self.ps10 in promoters)
+def mock_requests_post(*args, **kwargs):
+    """Mock for requests.post function.
 
-#     def test_net_promoter_score(self):
-#         scores = UserScore.objects.all()
-#         expected = (2.0 - 7.0) / 11 * 100
-#         self.assertEqual(scores.net_promoter_score(), expected)
+    This allows us to have deterministic output from
+    json method
 
-#     def test_most_recent_user_score(self):
-#         score = UserScore.objects.most_recent_user_score(self.user)
-#         self.assertEqual(score, self.ps10)
+    """
+    return MockResponse()
 
-#     def test_days_since_user_score(self):
-#         score = UserScore.objects.most_recent_user_score(self.user)
-#         # need to delete all the others
-#         UserScore.objects.exclude(id=score.id).delete()
-#         self.assertEqual(UserScore.objects.days_since_user_score(self.user), 0)
 
-#         # set the date back 7 days
-#         today = datetime.date.today()
-#         score.timestamp = today - datetime.timedelta(days=7)
-#         score.save()
-#         self.assertEqual(UserScore.objects.days_since_user_score(self.user), 7)
+class FunctionTests(TestCase):
 
-#         # delete all scores for the user
-#         score.delete()
-#         self.assertEqual(UserScore.objects.days_since_user_score(self.user), -1)
+    """Free function tests."""
 
-#     def test_display_to_user(self):
-#         score = UserScore.objects.most_recent_user_score(self.user)
-#         # need to delete all the others
-#         UserScore.objects.exclude(id=score.id).delete()
-#         self.assertEqual(UserScore.objects.days_since_user_score(self.user), 0)
-#         # set the date back 7 days
-#         today = datetime.date.today()
-#         score.timestamp = today - datetime.timedelta(days=7)
-#         score.save()
-#         self.assertEqual(UserScore.objects.days_since_user_score(self.user), 7)
-#         self.assertEqual(UserScore.objects.display_to_user(self.user, 6), True)
-#         self.assertEqual(UserScore.objects.display_to_user(self.user, 7), False)
-#         self.assertEqual(UserScore.objects.display_to_user(self.user, 8), False)
+    def test_get_domain(self):
+        site = Site.objects.get()
+        self.assertEqual(get_domain(), site.domain)
+
+    @mock.patch('hipchat.models.get_domain', lambda: 'foo.com')
+    def test_get_full_url(self):
+        self.assertEqual(get_full_url("foo"), "https://foo.com/foo")
+        self.assertEqual(get_full_url("/foo"), "https://foo.com/foo")
+
+    @mock.patch('requests.post', mock_requests_post)
+    @mock.patch('hipchat.models.AppInstall.http_auth', lambda x: {})
+    @mock.patch('hipchat.models.AppInstall.token_request_data', lambda x: {})
+    def test_request_access_token(self):
+        # This is a bit of fudge - we're really only validating that
+        # the function calls the post function and returns the json value.
+        self.assertEqual(
+            request_access_token(AppInstall()),
+            {'hello': 'world'}
+        )
+
+
+class HipChatAppModelTests(TransactionTestCase):
+
+    """Test suite for the HipChatApp model attrs and methods."""
+
+    fixtures = ['scopes.json']
+
+    def test_strings(self):
+        key = u"∂ƒ©˙∆˚"
+        app = HipChatApp(key=key)
+        self.assertEqual(unicode(app), key)
+        self.assertEqual(str(app), key.encode('utf-8'))
+        self.assertEqual(repr(app), "<HipChatApp id=None key='%s'>" % (key.encode('utf-8')))
+
+    def test_save(self):
+        app = HipChatApp()
+        self.assertEqual(app.save(), app)
+        self.assertIsNotNone(app.id, None)
+
+    @mock.patch('hipchat.models.get_domain', lambda: 'foo.com')
+    def test_descriptor_url(self):
+        app = HipChatApp()
+        self.assertIsNone(app.descriptor_url())
+        app.save()
+        url = get_full_url(app.get_absolute_url())
+        self.assertEqual(app.descriptor_url(), url)
+
+    @mock.patch('hipchat.models.get_domain', lambda: 'foo.com')
+    def test_install_url(self):
+        app = HipChatApp()
+        self.assertIsNone(app.install_url())
+        app.save()
+        url = reverse('hipchat:install', kwargs={'app_id': app.id})
+        self.assertEqual(app.install_url(), get_full_url(url))
+
+    def test_scopes_as_list(self):
+        app = HipChatApp().save()
+        scopes = random.sample(list(Scope.objects.all()), 3)
+        for scope in scopes:
+            app.scopes.add(scope)
+        scopes_list = [s.name for s in scopes]
+        self.assertEqual(app.scopes_as_list(), sorted(scopes_list))
+
+    def test_scopes_as_string(self):
+        app = HipChatApp()
+        with mock.patch('hipchat.models.HipChatApp.scopes_as_list', lambda x: []):
+            self.assertEqual(app.scopes_as_string(), "")
+        with mock.patch('hipchat.models.HipChatApp.scopes_as_list', lambda x: ['x']):
+            self.assertEqual(app.scopes_as_string(), "x")
+        with mock.patch('hipchat.models.HipChatApp.scopes_as_list', lambda x: ['x', 'y']):
+            self.assertEqual(app.scopes_as_string(), "x y")
+
+    @mock.patch('hipchat.models.get_domain', lambda: 'foo.com')
+    def test_descriptor(self):
+        app = HipChatApp()
+        app.key = "key"
+        app.name = "name"
+        app.description = "description"
+        app.vendor_name = "ACME"
+        app.vendor_url = "example.com"
+        app.allow_global = True
+        app.allow_room = True
+        # before saving we have no URLs to call back to
+        # so the descriptor is null
+        self.assertEqual(app.descriptor(), None)
+
+        app.save()
+
+        expected = {
+            "key": "key",
+            "name": "name",
+            "description": "description",
+            "vendor": {
+                "name": "ACME",
+                "url": "example.com"
+            },
+            "links": {
+                "self": app.descriptor_url(),
+            },
+            "capabilities": {
+                "hipchatApiConsumer": {
+                    "scopes": []
+                },
+                "installable": {
+                    "callbackUrl": app.install_url(),
+                    "allowGlobal": True,
+                    "allowRoom": True
+                },
+            },
+            # "glance": [g.descriptor() for g in self.glances.all()]
+        }
+        self.assertEqual(app.descriptor(), expected)
+
+        app.scopes.add(Scope.objects.first())
+        scopes = app.descriptor()['capabilities']['hipchatApiConsumer']['scopes']
+        self.assertEqual(scopes, app.scopes_as_list())
+
+        glance = Glance(app=app, key='key').save()
+        app.glances.add(glance)
+        self.assertEqual(app.descriptor()['glance'], [glance.descriptor()])
+
+
+class ScopeModelTests(TransactionTestCase):
+
+    """Test suite for Scope model attrs and methods."""
+
+    fixtures = ['scopes.json']
+
+    def test_strings(self):
+        name = u"∂ƒ©˙∆˚"
+        obj = Scope(name=name)
+        self.assertEqual(unicode(obj), name)
+        self.assertEqual(str(obj), name.encode('utf-8'))
+        self.assertEqual(repr(obj), "<Scope id=None name='%s'>" % (name.encode('utf-8')))
+
+    def test_save(self):
+        scope = Scope()
+        self.assertEqual(scope.save(), scope)
+        self.assertIsNotNone(scope.id)
+
+
+class AppInstallModelTests(TransactionTestCase):
+
+    """Test suite for AppInstall model attrs and methods."""
+
+    fixtures = ['scopes.json']
+
+    def setUp(self):
+        self.app = HipChatApp(key=u"∂ƒ©˙∆˚").save()
+        self.install = AppInstall(app=self.app, group_id=0)
+        self.assertIsNone(self.install.installed_at)
+        self.install.save()
+        self.assertIsNotNone(self.install.installed_at)
+
+    def test_strings(self):
+        obj = self.install
+        # confirm they don't blow up.
+        self.assertIsNotNone(unicode(obj))
+        self.assertIsNotNone(str(obj))
+        self.assertIsNotNone(repr(obj))
+
+    def test_save(self):
+        obj = self.install.save()
+        # we're just confirming that the save method
+        # returns self
+        self.assertIsNotNone(obj)
+
+    def test_http_auth(self):
+        obj = AppInstall(oauth_id="foo", oauth_secret="bar")
+        auth = obj.http_auth()
+        self.assertEqual(auth.username, obj.oauth_id)
+        self.assertEqual(auth.password, obj.oauth_secret)
+
+    def test_parse_json(self):
+        data = {
+            "capabilitiesUrl": "https://api.hipchat.com/v2/capabilities",
+            "oauthId": "abc",
+            "oauthSecret": "xyz",
+            "groupId": 123,
+            # "roomId": "1234"
+        }
+        obj = self.install.parse_json(data)
+        self.assertEqual(obj.oauth_id, 'abc')
+        self.assertEqual(obj.oauth_secret, 'xyz')
+        self.assertEqual(obj.group_id, 123)
+        self.assertEqual(obj.room_id, None)
+        data['roomId'] = '123'
+        obj = self.install.parse_json(data)
+        self.assertEqual(obj.room_id, '123')
+
+    def test_token_request_data(self):
+        obj = self.install
+        with mock.patch('hipchat.models.HipChatApp.scopes_as_string', lambda x: 'foo'):
+            self.assertEqual(
+                obj.token_request_data(),
+                {'scope': 'foo', 'grant_type': 'client_credentials'}
+            )
+
+    def test_get_access_token(self):
+        token_data = {
+            'access_token': '52363462337245724',
+            'expires_in': 3599,
+            'group_id': 123,
+            'group_name': 'Example Company',
+            'scope': 'send_notification',
+            'token_type': 'bearer'
+        }
+        self.assertFalse(AccessToken.objects.exists())
+        with mock.patch('hipchat.models.request_access_token', lambda x: token_data):
+            token = self.install.get_access_token()
+            self.assertEqual(token, AccessToken.objects.get())
+            self.assertEqual(token.app, self.app)
+            self.assertEqual(token.install, self.install)
+            self.assertEqual(token.group_id, 123)
+            self.assertEqual(token.group_name, 'Example Company')
+            self.assertEqual(token.scope, 'send_notification')
+            self.assertIsNotNone(token.created_at)
