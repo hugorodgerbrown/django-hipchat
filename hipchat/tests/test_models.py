@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import datetime
 import mock
 import random
 
@@ -12,10 +13,12 @@ from hipchat.models import (
     AppInstall,
     AccessToken,
     Glance,
+    GlanceData,
     get_full_url,
     get_domain,
     request_access_token,
-    SCHEME
+    SCHEME,
+    tz_now
 )
 
 
@@ -62,7 +65,7 @@ class FunctionTests(TestCase):
         )
 
 
-class HipChatAppModelTests(TransactionTestCase):
+class HipChatAppTests(TransactionTestCase):
 
     """Test suite for the HipChatApp model attrs and methods."""
 
@@ -73,7 +76,7 @@ class HipChatAppModelTests(TransactionTestCase):
         app = HipChatApp(key=key)
         self.assertEqual(unicode(app), key)
         self.assertEqual(str(app), key.encode('utf-8'))
-        self.assertEqual(repr(app), "<HipChatApp id=None key='%s'>" % (key.encode('utf-8')))
+        self.assertEqual(repr(app), "<HipChatApp id=None key='%s'>" % key.encode('utf-8'))
 
     def test_save(self):
         app = HipChatApp()
@@ -163,7 +166,7 @@ class HipChatAppModelTests(TransactionTestCase):
         self.assertEqual(app.descriptor()['glance'], [glance.descriptor()])
 
 
-class ScopeModelTests(TransactionTestCase):
+class ScopeTests(TransactionTestCase):
 
     """Test suite for Scope model attrs and methods."""
 
@@ -182,7 +185,7 @@ class ScopeModelTests(TransactionTestCase):
         self.assertIsNotNone(scope.id)
 
 
-class AppInstallModelTests(TransactionTestCase):
+class AppInstallTests(TransactionTestCase):
 
     """Test suite for AppInstall model attrs and methods."""
 
@@ -258,3 +261,197 @@ class AppInstallModelTests(TransactionTestCase):
             self.assertEqual(token.group_name, 'Example Company')
             self.assertEqual(token.scope, 'send_notification')
             self.assertIsNotNone(token.created_at)
+
+
+class AccessTokenTests(TransactionTestCase):
+
+    """Test suite for the AccessToken model attrs and methods."""
+
+    fixtures = ['scopes.json']
+
+    def setUp(self):
+        self.app = HipChatApp(key=u"∂ƒ©˙∆˚").save()
+        self.install = AppInstall(app=self.app, group_id=0).save()
+
+    def test_strings(self):
+        token = "1234567890"
+        obj = AccessToken(app=self.app, install=self.install, access_token=token)
+        self.assertEqual(unicode(obj), obj.access_token)
+        self.assertEqual(str(obj), obj.access_token)
+        self.assertEqual(repr(obj), "<AccessToken id=None token='%s'>" % obj.access_token)
+
+    def test_save(self):
+        obj = AccessToken(app=self.app, install=self.install, group_id=123)
+        self.assertEqual(obj.save(), obj)
+        self.assertIsNotNone(obj.id)
+
+    def test_has_expired(self):
+        obj = AccessToken()
+        self.assertIsNone(obj.expires_at)
+        self.assertTrue(obj.has_expired)
+        for i in range(-100, 100, 10):
+            obj.expires_at = datetime.datetime.now() + datetime.timedelta(milliseconds=i)
+            self.assertEqual(obj.has_expired, obj.expires_at < datetime.datetime.now())
+
+    def test_token_type(self):
+        obj = AccessToken()
+        self.assertEqual(obj.token_type, 'bearer')
+
+    def test_set_expiry(self):
+        timestamp = datetime.datetime.now() - datetime.timedelta(seconds=10)
+        obj = AccessToken(expires_at=timestamp)
+        self.assertEqual(obj.expires_at, timestamp)
+        self.assertTrue(obj.has_expired)
+        with mock.patch('hipchat.models.tz_now', lambda: timestamp):
+            obj.set_expiry(10)
+            self.assertFalse(obj.has_expired)
+            self.assertEqual(obj.expires_at, timestamp + datetime.timedelta(seconds=10))
+
+    def test_parse_json(self):
+        data = {
+            'access_token': '5236346233724572457245gdgreyt345yreg',
+            'expires_in': 431999999,
+            'group_id': 123,
+            'group_name': 'Example Company',
+            'scope': 'send_notification',
+            'token_type': 'bearer'
+        }
+        obj = AccessToken()
+        timestamp = datetime.datetime.now() - datetime.timedelta(seconds=10)
+        with mock.patch('hipchat.models.tz_now', lambda: timestamp):
+            obj.parse_json(data)
+            self.assertEqual(obj.access_token, data['access_token'])
+            self.assertEqual(obj.group_id, data['group_id'])
+            self.assertEqual(obj.group_name, data['group_name'])
+            self.assertEqual(obj.scope, data['scope'])
+            self.assertEqual(
+                obj.expires_at,
+                timestamp + datetime.timedelta(seconds=data['expires_in'])
+            )
+
+
+class GlanceTests(TransactionTestCase):
+
+    """Test suite for Glance model attrs and methods."""
+
+    fixtures = ['scopes.json']
+
+    def setUp(self):
+        self.app = HipChatApp(key=u"∂ƒ©˙∆˚").save()
+
+    def test_strings(self):
+        key = u"∂ƒ©˙∆˚"
+        obj = Glance(key=key)
+        self.assertEqual(unicode(obj), key)
+        self.assertEqual(str(obj), key.encode('utf-8'))
+        self.assertEqual(repr(obj), "<Glance id=None key='%s'>" % key.encode('utf-8'))
+
+    def test_save(self):
+        obj = Glance(app=self.app, key='key')
+        self.assertEqual(obj.save(), obj)
+
+    def test_query_url(self):
+        obj = Glance(app=self.app).save()
+        self.assertEqual(obj.query_url(), get_full_url(obj.get_absolute_url()))
+        obj.data_url = "http://www.example.com"
+        self.assertEqual(obj.query_url(), "http://www.example.com")
+
+
+class GlanceDataTests(TransactionTestCase):
+
+    """Test suite for GlanceData model attrs and methods."""
+
+    fixtures = ['scopes.json']
+
+    def setUp(self):
+        self.app = HipChatApp(key=u"∂ƒ©˙∆˚").save()
+        self.glance = Glance(app=self.app).save()
+
+    def test_save(self):
+        obj = GlanceData(glance=self.glance)
+        self.assertEqual(obj.label_type, 'html')
+        self.assertEqual(obj.save(), obj)
+
+    def test_has_lozenge(self):
+        obj = GlanceData(glance=self.glance)
+        self.assertEqual(obj.lozenge_type, GlanceData.LOZENGE_EMPTY)
+        self.assertFalse(obj.has_lozenge)
+        for choice in GlanceData.LOZENGE_CHOICES:
+            obj.lozenge_type = choice
+            self.assertEqual(obj.has_lozenge, choice != GlanceData.LOZENGE_EMPTY)
+
+    def test_has_icon(self):
+        obj = GlanceData(glance=self.glance)
+        self.assertEqual(obj.icon_url, '')
+        self.assertEqual(obj.icon_url2, '')
+        self.assertFalse(obj.has_icon)
+
+        # combinations of icon_url and icon_url2
+        for s in (
+            ('x', '', True),
+            ('', 'x', False),
+            ('x', 'x', True),
+            ('', '', False),
+            (None, '', False),
+            ('', None, False),
+            (None, None, False),
+        ):
+            obj.icon_url = s[0]
+            obj.icon_url2 = s[1]
+            self.assertEqual(obj.has_icon, s[2])
+
+    def test_label(self):
+        obj = GlanceData(label_value=u"∂ƒ©˙")
+        self.assertEqual(
+            obj.label(),
+            {
+                'type': 'html',
+                'value': obj.label_value
+            }
+        )
+
+    def test_status(self):
+        obj = GlanceData(
+            lozenge_type=GlanceData.LOZENGE_DEFAULT,
+            lozenge_value="foo",
+        )
+        status = obj.status()
+        self.assertEqual(status['type'], 'lozenge')
+        self.assertEqual(
+            status['value'],
+            {
+                'type': GlanceData.LOZENGE_DEFAULT,
+                'label': "foo"
+            }
+        )
+
+        # now try with an icon
+        obj.lozenge_type = GlanceData.LOZENGE_EMPTY
+        obj.icon_url = "www"
+        obj.icon_url2 = "xyz"
+        self.assertEqual(obj.status()['type'], 'icon')
+        self.assertEqual(
+            obj.status()['value'],
+            {
+                'url': "www",
+                'url@2x': "xyz"
+            }
+        )
+
+        obj.icon_url = ''
+        self.assertEqual(obj.status(), {})
+
+    def test_metadata(self):
+        obj = GlanceData(
+            lozenge_type=GlanceData.LOZENGE_DEFAULT,
+            lozenge_value="foo",
+        )
+        self.assertEqual(
+            obj.content(),
+            {
+                'status': obj.status(),
+                'label': obj.label()
+            }
+        )
+        obj.metadata = {'foo': 'bar'}
+        self.assertEqual(obj.content()['metadata'], {'foo': 'bar'})

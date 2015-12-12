@@ -351,6 +351,8 @@ class AccessToken(models.Model):
     created_at = models.DateTimeField(
         help_text="Set when this object is first saved."
     )
+    # included for API completeness only
+    token_type = 'bearer'
 
     def __unicode__(self):
         return u"%s" % self.access_token
@@ -369,12 +371,7 @@ class AccessToken(models.Model):
     @property
     def has_expired(self):
         """Return True if the token has gone past its expiry date."""
-        return self.expires_at < tz_now()
-
-    # included for API completeness only
-    @property
-    def token_type(self):
-        return 'bearer'
+        return self.expires_at is None or self.expires_at < tz_now()
 
     def set_expiry(self, seconds):
         """Set the expires_at value a number of seconds into the future.
@@ -440,18 +437,17 @@ class Glance(models.Model):
     )
 
     def __unicode__(self):
-        return u"%s" % self.key
+        return self.key
 
     def __str__(self):
         return unicode(self).encode('utf-8')
 
     def __repr__(self):
-        return u"<Glance id=%s key='%s'>" % (self.id, self.key)
+        return "<Glance id=%s key='%s'>" % (self.id, self.key.encode('utf-8'))
 
     def get_absolute_url(self):
         return reverse('hipchat:glance', kwargs={'glance_id': self.id})
 
-    @property
     def query_url(self):
         """Return full URL - including scheme and domain."""
         if self.data_url == '':
@@ -552,6 +548,10 @@ class GlanceData(models.Model):
     def has_icon(self):
         return self.icon_url not in (None, '')
 
+    @property
+    def has_metadata(self):
+        return self.metadata not in (None, '')
+
     def save(self, *args, **kwargs):
         super(GlanceData, self).save(*args, **kwargs)
         return self
@@ -582,8 +582,10 @@ class GlanceData(models.Model):
 
     def content(self):
         """Return the JSON data to be posted to the API."""
-        return {
+        content = {
             'status': self.status(),
             'label': self.label(),
-            'metadata': self.metadata
         }
+        if self.has_metadata:
+            content['metadata'] = self.metadata
+        return content
