@@ -1,59 +1,108 @@
-# # -*- coding: utf-8 -*-
-# import json
+# -*- coding: utf-8 -*-
+import json
 
-# from django.contrib.auth import get_user_model
 # from django.core.urlresolvers import reverse
-# from django.test import Client, TransactionTestCase, RequestFactory
+from django.http import Http404
+from django.test import TransactionTestCase, RequestFactory
 
-# from net_promoter_score.models import score_group, UserScore
-# from net_promoter_score.views import post_score
+from hipchat import models
+from hipchat import signals
+from hipchat import views
 
 
-# class UserScoreViewTests(TransactionTestCase):
+class ViewTests(TransactionTestCase):
 
-#     """Test suite for promoter score views."""
+    """Test suite for promoter score views."""
 
-#     def setUp(self):
-#         self.user = get_user_model().objects.create_user(
-#             'zoidberg', password="foo"
-#         )
-#         self.factory = RequestFactory()
+    def setUp(self):
+        self.factory = RequestFactory()
 
-#     def test_valid_post_201(self):
-#         """Test that posting valid data returns the score and status_code 201."""
-#         data={'score': 0, 'reason': u"√" * 512}
-#         request = self.factory.post('/', data)
-#         request.user = self.user
-#         resp = post_score(request)
-#         self.assertEqual(resp.status_code, 201)
-#         respj = json.loads(resp.content)
-#         self.assertEqual(respj['success'], True)
-#         self.assertEqual(respj['score']['user'], self.user.id)
-#         self.assertEqual(respj['score']['score'], data['score'])
-#         self.assertEqual(respj['score']['group'], score_group(data['score']))
+    def test_descriptor_200(self):
+        app = models.HipChatApp().save()
+        request = self.factory.get('/')
+        resp = views.descriptor(request, app_id=app.id)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.content, json.dumps(app.descriptor()))
 
-#     def test_invalid_post_422(self):
-#         """Test that posting invalid data returns the errors and status_code 422."""
-#         request = self.factory.post('/', {'score': -2})
-#         request.user = self.user
-#         resp = post_score(request)
-#         self.assertEqual(resp.status_code, 422)
-#         respj = json.loads(resp.content)
-#         self.assertEqual(respj['success'], False)
-#         self.assertEqual(respj['errors'], [[u'score', u'Score must be between 0-10']])  # noqa
+    def test_descriptor_404(self):
+        request = self.factory.get('/')
+        self.assertRaises(Http404, views.descriptor, request, app_id=0)
 
-#     def test_client_post_anon_302(self):
-#         """Test posting as an AnonymousUser to the url."""
-#         client = Client()
-#         url = reverse('net_promoter_score:post_score')
-#         resp = client.post(url, data={'score': 0, 'reason': u"√" * 512})
-#         self.assertEqual(resp.status_code, 302)
+    def test_install_201(self):
+        app = models.HipChatApp().save()
+        data = {
+            "capabilitiesUrl": "https://api.hipchat.com/v2/capabilities",
+            "oauthId": "abc",
+            "oauthSecret": "xyz",
+            "groupId": 123,
+            "roomId": "1234"
+        }
+        self.assertFalse(models.AppInstall.objects.exists())
+        request = self.factory.post(
+            '/',
+            json.dumps(data),
+            content_type='application/json'
+        )
+        resp = views.install(request, app_id=app.id)
+        self.assertEqual(resp.status_code, 201)
+        install = models.AppInstall.objects.get()
+        self.assertEqual(install.oauth_id, data['oauthId'])
+        self.assertEqual(install.oauth_secret, data['oauthSecret'])
+        self.assertEqual(install.group_id, data['groupId'])
+        self.assertEqual(install.room_id, int(data['roomId']))
 
-#     def test_client_post_auth_201(self):
-#         """Test posting as a User to the url."""
-#         client = Client()
-#         client.login(username='zoidberg', password='foo')
-#         url = reverse('net_promoter_score:post_score')
-#         resp = client.post(url, data={'score': 0, 'reason': u"√" * 512})
-#         self.assertEqual(resp.status_code, 201)
-#         self.assertEqual(UserScore.objects.count(), 1)
+    def test_install_422(self):
+        app = models.HipChatApp().save()
+        models.AppInstall(app=app, oauth_id="abc", group_id=0).save()
+        data = {
+            "capabilitiesUrl": "https://api.hipchat.com/v2/capabilities",
+            "oauthId": "abc",
+            "oauthSecret": "xyz",
+            "groupId": 123,
+            "roomId": "1234"
+        }
+        request = self.factory.post(
+            '/',
+            json.dumps(data),
+            content_type='application/json'
+        )
+        resp = views.install(request, app_id=app.id)
+        self.assertEqual(resp.status_code, 422)
+
+    def test_delete_204(self):
+        app = models.HipChatApp().save()
+        install = models.AppInstall(app=app, oauth_id="abc", group_id=0).save()
+        request = self.factory.delete('/')
+        resp = views.delete(request, app_id=app.id, oauth_id=install.oauth_id)
+        self.assertEqual(resp.status_code, 204)
+        self.assertFalse(models.AppInstall.objects.exists())
+
+    def test_delete_404(self):
+        request = self.factory.delete('/')
+        self.assertRaises(Http404, views.delete, request, app_id=0, oauth_id=0)
+
+    def test_glance_200_no_handlers(self):
+        self.app = models.HipChatApp(key=u"∂ƒ©˙∆˚").save()
+        self.glance = models.Glance(app=self.app).save()
+        request = self.factory.get('/')
+        resp = views.glance(request, glance_id=self.glance.id)
+        self.assertEqual(resp.status_code, 204)
+        self.assertEqual(resp.content, '{}')
+
+    def test_glance_200(self):
+        self.app = models.HipChatApp(key=u"∂ƒ©˙∆˚").save()
+        self.glance = models.Glance(app=self.app).save()
+        request = self.factory.get('/')
+
+        def on_glance_data_request(sender, **kwargs):
+            return {'foo': 'bar'}
+
+        signals.glance_data_requested.connect(on_glance_data_request)
+
+        resp = views.glance(request, glance_id=self.glance.id)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.content, '{"foo": "bar"}')
+
+    def test_glance_404(self):
+        request = self.factory.get('/')
+        self.assertRaises(Http404, views.glance, request, glance_id=0)

@@ -285,7 +285,7 @@ class AppInstall(models.Model):
         self.oauth_secret = json_data['oauthSecret']
         self.group_id = json_data['groupId']
         if 'roomId' in json_data:
-            self.room_id = json_data['roomId']
+            self.room_id = int(json_data['roomId'])
         return self
 
     def token_request_data(self):

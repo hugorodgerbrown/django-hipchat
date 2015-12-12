@@ -232,7 +232,7 @@ class AppInstallTests(TransactionTestCase):
         self.assertEqual(obj.room_id, None)
         data['roomId'] = '123'
         obj = self.install.parse_json(data)
-        self.assertEqual(obj.room_id, '123')
+        self.assertEqual(obj.room_id, 123)
 
     def test_token_request_data(self):
         obj = self.install

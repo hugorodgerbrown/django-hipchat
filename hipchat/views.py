@@ -3,7 +3,6 @@
 import json
 import logging
 
-from django.contrib.auth.decorators import user_passes_test
 from django.db import IntegrityError
 from django.http import JsonResponse, HttpResponse
 from django.shortcuts import get_object_or_404
@@ -11,7 +10,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from hipchat.models import HipChatApp, AppInstall, Glance
-from hipchat.signals import glance_data_request
+from hipchat.signals import glance_data_requested
 
 logger = logging.getLogger(__name__)
 
@@ -36,9 +35,9 @@ def install(request, app_id):
 
     """
     app = get_object_or_404(HipChatApp, id=app_id)
-    data =json.loads(request.body)
+    data = json.loads(request.body)
     try:
-        install = AppInstall(app=app).parse_json(data).save()
+        AppInstall(app=app).parse_json(data).save()
         return HttpResponse("Thank you for installing our app", status=201)
     except IntegrityError:
         logger.warning("Duplicate HipChat app install oauthId value.")
@@ -74,15 +73,12 @@ def glance(request, glance_id):
 
     """
     glance = get_object_or_404(Glance, id=glance_id)
-    # this returns a list of 2-tuples (receiver, response) - we
-    # are expecting only a single response, which should be a
-    # GlanceData object
-    data = glance_data_request.send(sender=None, glance=glance)
-
+    # this returns a list of 2-tuples (receiver, response)
+    data = glance_data_requested.send(sender=None, glance=glance)
     if len(data) == 0:
-        return JsonResponse({}, status=404)
+        # we received the request, but there's nothing listening,
+        # so return with a 204 (no content)
+        return JsonResponse({}, status=204)
     else:
-        # assert isinstance(data[0][1], GlanceData), (
-        #     "glance_data_request signal receiver must return GlanceData object"
-        # )
+        # return the response from the first signal receiver
         return JsonResponse(data[0][1], status=200)
