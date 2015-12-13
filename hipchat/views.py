@@ -75,6 +75,7 @@ def glance(request, glance_id):
     https://ecosystem.atlassian.net/wiki/display/HIPDEV/HipChat+Glances
 
     """
+    print 'glance request', request
     glance = get_object_or_404(Glance, id=glance_id)
     # this returns a list of 2-tuples (receiver, response)
     data = glance_data_requested.send(sender=None, glance=glance)
@@ -83,7 +84,7 @@ def glance(request, glance_id):
         # create an empty update
         update = GlanceUpdate(
             glance=glance,
-            label_value="No data",
+            label_value="Briefs",
             lozenge_type=GlanceUpdate.LOZENGE_DEFAULT
         )
     else:

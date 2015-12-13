@@ -479,7 +479,7 @@ class Glance(models.Model):
                 "url": self.icon_url,
                 "url@2x": self.icon_url2
             }
-            }
+        }
 
 
 class GlanceUpdate(models.Model):
