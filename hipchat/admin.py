@@ -4,10 +4,12 @@ import json
 from django.contrib import admin
 from django.utils.safestring import mark_safe
 
-from hipchat.models import HipChatApp, AppInstall, AccessToken, Glance, GlanceData
+from hipchat.models import Addon, Install, AccessToken, Glance, GlanceUpdate
 
 
 class DescriptorMixin(object):
+
+    """Provides access to pretty-formatted version of descriptor property."""
 
     def pretty_descriptor(self, obj):
         """Return pretty formatted version of descriptor() output."""
@@ -22,18 +24,29 @@ class DescriptorMixin(object):
     pretty_descriptor.short_description = "Descriptor (formatted)"
 
 
-class HipChatAppAdmin(DescriptorMixin, admin.ModelAdmin):
+class AddonAdmin(DescriptorMixin, admin.ModelAdmin):
 
-    """Admin model for HipChatApp objects."""
+    """Admin model for Addon objects."""
 
     list_display = (
         'key',
         'name',
         'description',
         'allow_global',
-        'allow_room'
+        'allow_room',
+        'install_link'
     )
     readonly_fields = ('pretty_descriptor',)
+
+    def install_link(self, obj):
+        """Return link to install direct."""
+        return (
+            "<a target='_blank' "
+            "href='https://www.hipchat.com/addons/install?url=%s'>Install</a>"
+            % obj.descriptor_url()
+        )
+    install_link.allow_tags = True
+    install_link.short_description = "Click to install"
 
 
 def get_access_tokens(modeladmin, request, queryset):
@@ -44,9 +57,9 @@ def get_access_tokens(modeladmin, request, queryset):
 get_access_tokens.short_description = "Get access tokens for selected installs."
 
 
-class AppInstallAdmin(admin.ModelAdmin):
+class InstallAdmin(admin.ModelAdmin):
 
-    """Admin model of AppInstall objects."""
+    """Admin model of Install objects."""
 
     list_display = (
         'app',
@@ -101,7 +114,7 @@ class GlanceAdmin(DescriptorMixin, admin.ModelAdmin):
     readonly_fields = ('pretty_descriptor',)
 
 
-class GlanceDataAdmin(admin.ModelAdmin):
+class GlanceUpdateAdmin(admin.ModelAdmin):
 
     """Admin model of Glance objects."""
 
@@ -125,8 +138,8 @@ class GlanceDataAdmin(admin.ModelAdmin):
         else:
             return None
 
-admin.site.register(HipChatApp, HipChatAppAdmin)
-admin.site.register(AppInstall, AppInstallAdmin)
+admin.site.register(Addon, AddonAdmin)
+admin.site.register(Install, InstallAdmin)
 admin.site.register(AccessToken, AccessTokenAdmin)
 admin.site.register(Glance, GlanceAdmin)
-admin.site.register(GlanceData, GlanceDataAdmin)
+admin.site.register(GlanceUpdate, GlanceUpdateAdmin)

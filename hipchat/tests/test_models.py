@@ -9,11 +9,11 @@ from django.test import TestCase, TransactionTestCase
 
 from hipchat.models import (
     Scope,
-    HipChatApp,
-    AppInstall,
+    Addon,
+    Install,
     AccessToken,
     Glance,
-    GlanceData,
+    GlanceUpdate,
     get_full_url,
     get_domain,
     request_access_token,
@@ -54,38 +54,38 @@ class FunctionTests(TestCase):
         self.assertEqual(get_full_url("/foo"), "https://foo.com/foo")
 
     @mock.patch('requests.post', mock_requests_post)
-    @mock.patch('hipchat.models.AppInstall.http_auth', lambda x: {})
-    @mock.patch('hipchat.models.AppInstall.token_request_data', lambda x: {})
+    @mock.patch('hipchat.models.Install.http_auth', lambda x: {})
+    @mock.patch('hipchat.models.Install.token_request_data', lambda x: {})
     def test_request_access_token(self):
         # This is a bit of fudge - we're really only validating that
         # the function calls the post function and returns the json value.
         self.assertEqual(
-            request_access_token(AppInstall()),
+            request_access_token(Install()),
             {'hello': 'world'}
         )
 
 
-class HipChatAppTests(TransactionTestCase):
+class AddonTests(TransactionTestCase):
 
-    """Test suite for the HipChatApp model attrs and methods."""
+    """Test suite for the Addon model attrs and methods."""
 
     fixtures = ['scopes.json']
 
     def test_strings(self):
         key = u"∂ƒ©˙∆˚"
-        app = HipChatApp(key=key)
+        app = Addon(key=key)
         self.assertEqual(unicode(app), key)
         self.assertEqual(str(app), key.encode('utf-8'))
-        self.assertEqual(repr(app), "<HipChatApp id=None key='%s'>" % key.encode('utf-8'))
+        self.assertEqual(repr(app), "<Addon id=None key='%s'>" % key.encode('utf-8'))
 
     def test_save(self):
-        app = HipChatApp()
+        app = Addon()
         self.assertEqual(app.save(), app)
         self.assertIsNotNone(app.id, None)
 
     @mock.patch('hipchat.models.get_domain', lambda: 'foo.com')
     def test_descriptor_url(self):
-        app = HipChatApp()
+        app = Addon()
         self.assertIsNone(app.descriptor_url())
         app.save()
         url = get_full_url(app.get_absolute_url())
@@ -93,14 +93,14 @@ class HipChatAppTests(TransactionTestCase):
 
     @mock.patch('hipchat.models.get_domain', lambda: 'foo.com')
     def test_install_url(self):
-        app = HipChatApp()
+        app = Addon()
         self.assertIsNone(app.install_url())
         app.save()
         url = reverse('hipchat:install', kwargs={'app_id': app.id})
         self.assertEqual(app.install_url(), get_full_url(url))
 
     def test_scopes_as_list(self):
-        app = HipChatApp().save()
+        app = Addon().save()
         scopes = random.sample(list(Scope.objects.all()), 3)
         for scope in scopes:
             app.scopes.add(scope)
@@ -108,17 +108,17 @@ class HipChatAppTests(TransactionTestCase):
         self.assertEqual(app.scopes_as_list(), sorted(scopes_list))
 
     def test_scopes_as_string(self):
-        app = HipChatApp()
-        with mock.patch('hipchat.models.HipChatApp.scopes_as_list', lambda x: []):
+        app = Addon()
+        with mock.patch('hipchat.models.Addon.scopes_as_list', lambda x: []):
             self.assertEqual(app.scopes_as_string(), "")
-        with mock.patch('hipchat.models.HipChatApp.scopes_as_list', lambda x: ['x']):
+        with mock.patch('hipchat.models.Addon.scopes_as_list', lambda x: ['x']):
             self.assertEqual(app.scopes_as_string(), "x")
-        with mock.patch('hipchat.models.HipChatApp.scopes_as_list', lambda x: ['x', 'y']):
+        with mock.patch('hipchat.models.Addon.scopes_as_list', lambda x: ['x', 'y']):
             self.assertEqual(app.scopes_as_string(), "x y")
 
     @mock.patch('hipchat.models.get_domain', lambda: 'foo.com')
     def test_descriptor(self):
-        app = HipChatApp()
+        app = Addon()
         app.key = "key"
         app.name = "name"
         app.description = "description"
@@ -185,15 +185,15 @@ class ScopeTests(TransactionTestCase):
         self.assertIsNotNone(scope.id)
 
 
-class AppInstallTests(TransactionTestCase):
+class InstallTests(TransactionTestCase):
 
-    """Test suite for AppInstall model attrs and methods."""
+    """Test suite for Install model attrs and methods."""
 
     fixtures = ['scopes.json']
 
     def setUp(self):
-        self.app = HipChatApp(key=u"∂ƒ©˙∆˚").save()
-        self.install = AppInstall(app=self.app, group_id=0)
+        self.app = Addon(key=u"∂ƒ©˙∆˚").save()
+        self.install = Install(app=self.app, group_id=0)
         self.assertIsNone(self.install.installed_at)
         self.install.save()
         self.assertIsNotNone(self.install.installed_at)
@@ -212,7 +212,7 @@ class AppInstallTests(TransactionTestCase):
         self.assertIsNotNone(obj)
 
     def test_http_auth(self):
-        obj = AppInstall(oauth_id="foo", oauth_secret="bar")
+        obj = Install(oauth_id="foo", oauth_secret="bar")
         auth = obj.http_auth()
         self.assertEqual(auth.username, obj.oauth_id)
         self.assertEqual(auth.password, obj.oauth_secret)
@@ -236,7 +236,7 @@ class AppInstallTests(TransactionTestCase):
 
     def test_token_request_data(self):
         obj = self.install
-        with mock.patch('hipchat.models.HipChatApp.scopes_as_string', lambda x: 'foo'):
+        with mock.patch('hipchat.models.Addon.scopes_as_string', lambda x: 'foo'):
             self.assertEqual(
                 obj.token_request_data(),
                 {'scope': 'foo', 'grant_type': 'client_credentials'}
@@ -270,15 +270,15 @@ class AccessTokenTests(TransactionTestCase):
     fixtures = ['scopes.json']
 
     def setUp(self):
-        self.app = HipChatApp(key=u"∂ƒ©˙∆˚").save()
-        self.install = AppInstall(app=self.app, group_id=0).save()
+        self.app = Addon(key=u"∂ƒ©˙∆˚").save()
+        self.install = Install(app=self.app, group_id=0).save()
 
     def test_strings(self):
         token = "1234567890"
         obj = AccessToken(app=self.app, install=self.install, access_token=token)
-        self.assertEqual(unicode(obj), obj.access_token)
-        self.assertEqual(str(obj), obj.access_token)
-        self.assertEqual(repr(obj), "<AccessToken id=None token='%s'>" % obj.access_token)
+        self.assertEqual(unicode(obj), obj.access_token[:6])
+        self.assertEqual(str(obj), obj.access_token[:6])
+        self.assertEqual(repr(obj), "<AccessToken id=None token='%s'>" % obj.access_token[:6])
 
     def test_save(self):
         obj = AccessToken(app=self.app, install=self.install, group_id=123)
@@ -337,7 +337,7 @@ class GlanceTests(TransactionTestCase):
     fixtures = ['scopes.json']
 
     def setUp(self):
-        self.app = HipChatApp(key=u"∂ƒ©˙∆˚").save()
+        self.app = Addon(key=u"∂ƒ©˙∆˚").save()
 
     def test_strings(self):
         key = u"∂ƒ©˙∆˚"
@@ -357,31 +357,31 @@ class GlanceTests(TransactionTestCase):
         self.assertEqual(obj.query_url(), "http://www.example.com")
 
 
-class GlanceDataTests(TransactionTestCase):
+class GlanceUpdateTests(TransactionTestCase):
 
-    """Test suite for GlanceData model attrs and methods."""
+    """Test suite for GlanceUpdate model attrs and methods."""
 
     fixtures = ['scopes.json']
 
     def setUp(self):
-        self.app = HipChatApp(key=u"∂ƒ©˙∆˚").save()
+        self.app = Addon(key=u"∂ƒ©˙∆˚").save()
         self.glance = Glance(app=self.app).save()
 
     def test_save(self):
-        obj = GlanceData(glance=self.glance)
+        obj = GlanceUpdate(glance=self.glance)
         self.assertEqual(obj.label_type, 'html')
         self.assertEqual(obj.save(), obj)
 
     def test_has_lozenge(self):
-        obj = GlanceData(glance=self.glance)
-        self.assertEqual(obj.lozenge_type, GlanceData.LOZENGE_EMPTY)
+        obj = GlanceUpdate(glance=self.glance)
+        self.assertEqual(obj.lozenge_type, GlanceUpdate.LOZENGE_EMPTY)
         self.assertFalse(obj.has_lozenge)
-        for choice in GlanceData.LOZENGE_CHOICES:
+        for choice in GlanceUpdate.LOZENGE_CHOICES:
             obj.lozenge_type = choice
-            self.assertEqual(obj.has_lozenge, choice != GlanceData.LOZENGE_EMPTY)
+            self.assertEqual(obj.has_lozenge, choice != GlanceUpdate.LOZENGE_EMPTY)
 
     def test_has_icon(self):
-        obj = GlanceData(glance=self.glance)
+        obj = GlanceUpdate(glance=self.glance)
         self.assertEqual(obj.icon_url, '')
         self.assertEqual(obj.icon_url2, '')
         self.assertFalse(obj.has_icon)
@@ -401,7 +401,7 @@ class GlanceDataTests(TransactionTestCase):
             self.assertEqual(obj.has_icon, s[2])
 
     def test_label(self):
-        obj = GlanceData(label_value=u"∂ƒ©˙")
+        obj = GlanceUpdate(label_value=u"∂ƒ©˙")
         self.assertEqual(
             obj.label(),
             {
@@ -411,8 +411,8 @@ class GlanceDataTests(TransactionTestCase):
         )
 
     def test_status(self):
-        obj = GlanceData(
-            lozenge_type=GlanceData.LOZENGE_DEFAULT,
+        obj = GlanceUpdate(
+            lozenge_type=GlanceUpdate.LOZENGE_DEFAULT,
             lozenge_value="foo",
         )
         status = obj.status()
@@ -420,13 +420,13 @@ class GlanceDataTests(TransactionTestCase):
         self.assertEqual(
             status['value'],
             {
-                'type': GlanceData.LOZENGE_DEFAULT,
+                'type': GlanceUpdate.LOZENGE_DEFAULT,
                 'label': "foo"
             }
         )
 
         # now try with an icon
-        obj.lozenge_type = GlanceData.LOZENGE_EMPTY
+        obj.lozenge_type = GlanceUpdate.LOZENGE_EMPTY
         obj.icon_url = "www"
         obj.icon_url2 = "xyz"
         self.assertEqual(obj.status()['type'], 'icon')
@@ -442,8 +442,8 @@ class GlanceDataTests(TransactionTestCase):
         self.assertEqual(obj.status(), {})
 
     def test_metadata(self):
-        obj = GlanceData(
-            lozenge_type=GlanceData.LOZENGE_DEFAULT,
+        obj = GlanceUpdate(
+            lozenge_type=GlanceUpdate.LOZENGE_DEFAULT,
             lozenge_value="foo",
         )
         self.assertEqual(

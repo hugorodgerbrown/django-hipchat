@@ -11,20 +11,19 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.CreateModel(
-            name='AppInstall',
+            name='AccessToken',
             fields=[
                 ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
-                ('oauth_id', models.CharField(help_text=b'OAuth ID returned from the app install postback.', max_length=20)),
-                ('oauth_secret', models.CharField(help_text=b'OAuth secret returned from the app install postback.', max_length=20)),
-                ('group_id', models.IntegerField(help_text=b'Name of the group, returned from the token URL.', blank=True)),
-                ('room_id', models.IntegerField(help_text=b'Id of the room into which the app was installed.', null=True, blank=True)),
-                ('access_token', models.CharField(help_text=b'API access token', max_length=40, blank=True)),
-                ('expires_in', models.DateTimeField(help_text=b'The datetime at which this access_token will expire.', null=True, blank=True)),
-                ('scope', models.CharField(help_text=b'Comma separated list of scopes.', max_length=500, blank=True)),
+                ('group_id', models.IntegerField(help_text=b'The HipChat group ID this token belongs to', blank=True)),
+                ('group_name', models.CharField(help_text=b'The HipChat group name this token belongs to.', max_length=100, blank=True)),
+                ('access_token', models.CharField(help_text=b'The generated access token to use to authenticate future requests.', unique=True, max_length=40, db_index=True, blank=True)),
+                ('expires_at', models.DateTimeField(help_text=b'The datetime at which this token will expire.', null=True, blank=True)),
+                ('scope', models.CharField(help_text=b'A space-delimited list of scopes that this token is allowed to use.', max_length=500, blank=True)),
+                ('created_at', models.DateTimeField(help_text=b'Set when this object is first saved.')),
             ],
         ),
         migrations.CreateModel(
-            name='HipChatApp',
+            name='Addon',
             fields=[
                 ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
                 ('key', models.CharField(help_text=b'Has to be unique', unique=True, max_length=100)),
@@ -37,6 +36,42 @@ class Migration(migrations.Migration):
             ],
         ),
         migrations.CreateModel(
+            name='Glance',
+            fields=[
+                ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
+                ('key', models.CharField(help_text=b'Unique key (in the context of the integration) to identify this glance.', max_length=40)),
+                ('name', models.CharField(help_text=b'The display name of the glance.', max_length=100, blank=True)),
+                ('data_url', models.URLField(help_text=b'REST endpoint exposed by the add-on for Glance data.', blank=True)),
+                ('target', models.CharField(help_text=b'The key of a sidebar web panel, dialog or external page.', max_length=b'40', blank=True)),
+                ('app', models.ForeignKey(related_name='glances', to='hipchat.Addon', help_text=b'The app this glance belongs to.')),
+            ],
+        ),
+        migrations.CreateModel(
+            name='GlanceUpdate',
+            fields=[
+                ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
+                ('label_value', models.CharField(help_text=b'HTML displayed in the glance body.', max_length=1000)),
+                ('lozenge_type', models.CharField(default=b'empty', max_length=10, choices=[(b'empty', b'no lozenge'), (b'default', b'default'), (b'success', b' success'), (b'current', b' current'), (b'complete', b'complete'), (b'error', b'error'), (b'new', b'new'), (b'moved', b'moved')])),
+                ('lozenge_value', models.CharField(help_text=b'Text displayed inside the lozenge.', max_length=20, blank=True)),
+                ('icon_url', models.URLField(help_text=b'URL to icon displayed on the right of the glance.', blank=True)),
+                ('icon_url2', models.URLField(help_text=b'URL to hi-res icon displayed on the right of the glance.', blank=True)),
+                ('metadata', models.TextField(help_text=b'Arbitrary JSON sent as the metadata value.', blank=True)),
+                ('glance', models.ForeignKey(help_text=b'The Glance that this data updated.', to='hipchat.Glance')),
+            ],
+        ),
+        migrations.CreateModel(
+            name='Install',
+            fields=[
+                ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
+                ('oauth_id', models.CharField(help_text=b'Value returned from the app install postback.', unique=True, max_length=20, db_index=True)),
+                ('oauth_secret', models.CharField(help_text=b'Value returned from the app install postback.', max_length=20)),
+                ('group_id', models.IntegerField(help_text=b'Value returned from the app install postback.', blank=True)),
+                ('room_id', models.IntegerField(help_text=b'Value returned from the app install postback.', null=True, blank=True)),
+                ('installed_at', models.DateTimeField(help_text=b'Timestamp set when the app is installed.')),
+                ('app', models.ForeignKey(help_text=b'App to which this access info belongs.', to='hipchat.Addon')),
+            ],
+        ),
+        migrations.CreateModel(
             name='Scope',
             fields=[
                 ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
@@ -45,13 +80,18 @@ class Migration(migrations.Migration):
             ],
         ),
         migrations.AddField(
-            model_name='hipchatapp',
+            model_name='addon',
             name='scopes',
             field=models.ManyToManyField(help_text=b'List of security scopes you need, which will dictate what REST APIs your add-on can call.', to='hipchat.Scope'),
         ),
         migrations.AddField(
-            model_name='appinstall',
+            model_name='accesstoken',
             name='app',
-            field=models.ForeignKey(help_text=b'App to which this access info belongs.', to='hipchat.HipChatApp'),
+            field=models.ForeignKey(blank=True, to='hipchat.Addon', help_text=b'None if a personal token.', null=True),
+        ),
+        migrations.AddField(
+            model_name='accesstoken',
+            name='install',
+            field=models.ForeignKey(blank=True, to='hipchat.Install', help_text=b'None if a personal token.', null=True),
         ),
     ]

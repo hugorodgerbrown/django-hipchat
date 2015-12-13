@@ -5,7 +5,6 @@ https://ecosystem.atlassian.net/wiki/display/HIPDEV/Server-side+installation+flo
 
 """
 import datetime
-import json
 import logging
 from urlparse import urljoin
 
@@ -44,7 +43,7 @@ def request_access_token(install):
     Pulled out as a function to allow for mocking.
 
     Args:
-        install: an AppInstall object for which we are requesting a token.
+        install: an Install object for which we are requesting a token.
 
     Returns the output from requests.post(...).json()
 
@@ -88,7 +87,7 @@ class Scope(models.Model):
         return self
 
 
-class HipChatApp(models.Model):
+class Addon(models.Model):
 
     """Store the data required for the HipChat add-on."""
 
@@ -151,7 +150,7 @@ class HipChatApp(models.Model):
         return unicode(self).encode('utf-8')
 
     def __repr__(self):
-        return "<HipChatApp id=%s key='%s'>" % (self.id, self.key.encode('utf-8'))
+        return "<Addon id=%s key='%s'>" % (self.id, self.key.encode('utf-8'))
 
     def get_absolute_url(self):
         return reverse('hipchat:descriptor', kwargs={'app_id': self.id})
@@ -207,11 +206,11 @@ class HipChatApp(models.Model):
         return descriptor
 
     def save(self, *args, **kwargs):
-        super(HipChatApp, self).save(*args, **kwargs)
+        super(Addon, self).save(*args, **kwargs)
         return self
 
 
-class AppInstall(models.Model):
+class Install(models.Model):
 
     """Store data returned from the HipChat API re. an app install.
 
@@ -221,7 +220,7 @@ class AppInstall(models.Model):
     """
 
     app = models.ForeignKey(
-        HipChatApp,
+        Addon,
         help_text="App to which this access info belongs."
     )
     # the following attrs are set by the install postback from HipChat
@@ -248,17 +247,17 @@ class AppInstall(models.Model):
     )
 
     def __unicode__(self):
-        return u"%s (%s)" % (self.app, self.oauth_id)
+        return u"%s" % (self.oauth_id.split('-')[0])
 
     def __str__(self):
         return unicode(self).encode('utf-8')
 
     def __repr__(self):
-        return u"<AppInstall id=%s app=%s>" % (self.id, self.app.id)
+        return u"<Install id=%s app=%s>" % (self.id, self.app.id)
 
     def save(self, *args, **kwargs):
         self.installed_at = self.installed_at or tz_now()
-        super(AppInstall, self).save(*args, **kwargs)
+        super(Install, self).save(*args, **kwargs)
         return self
 
     def http_auth(self):
@@ -314,12 +313,12 @@ class AccessToken(models.Model):
     """Store specific access tokens, and their scopes."""
 
     app = models.ForeignKey(
-        HipChatApp,
+        Addon,
         help_text="None if a personal token.",
         blank=True, null=True
     )
     install = models.ForeignKey(
-        AppInstall,
+        Install,
         help_text="None if a personal token.",
         blank=True, null=True
     )
@@ -355,13 +354,13 @@ class AccessToken(models.Model):
     token_type = 'bearer'
 
     def __unicode__(self):
-        return u"%s" % self.access_token
+        return u"%s" % self.access_token[:6]
 
     def __str__(self):
         return unicode(self).encode('utf-8')
 
     def __repr__(self):
-        return u"<AccessToken id=%s token='%s'>" % (self.id, self.access_token)
+        return u"<AccessToken id=%s token='%s'>" % (self.id, self.access_token[:6])
 
     def save(self, *args, **kwargs):
         self.created_at = self.created_at or tz_now()
@@ -413,7 +412,7 @@ class Glance(models.Model):
     """HipChat glance descriptor."""
 
     app = models.ForeignKey(
-        HipChatApp,
+        Addon,
         help_text="The app this glance belongs to.",
         related_name='glances'
     )
@@ -434,6 +433,14 @@ class Glance(models.Model):
         max_length="40",
         blank=True,
         help_text="The key of a sidebar web panel, dialog or external page."
+    )
+    icon_url = models.URLField(
+        blank=True,
+        help_text="URL to icon displayed on the left of the glance."
+    )
+    icon_url2 = models.URLField(
+        blank=True,
+        help_text="URL to hi-res icon displayed on the left of the glance."
     )
 
     def __unicode__(self):
@@ -461,18 +468,21 @@ class Glance(models.Model):
 
     def descriptor(self):
         """Return JSON descriptor for the Glance."""
-        descriptor = {
+        return {
             "name": {
                 "value": self.name
             },
-            "queryUrl": self.query_url,
+            "queryUrl": self.query_url(),
             "key": self.key,
-            "target": self.target
-        }
-        return descriptor
+            "target": self.target,
+            "icon": {
+                "url": self.icon_url,
+                "url@2x": self.icon_url2
+            }
+            }
 
 
-class GlanceData(models.Model):
+class GlanceUpdate(models.Model):
 
     """Container for Glance data response.
 
@@ -537,12 +547,9 @@ class GlanceData(models.Model):
         help_text="Arbitrary JSON sent as the metadata value."
     )
 
-    class Meta:
-        verbose_name = "Glance data"
-
     @property
     def has_lozenge(self):
-        return self.lozenge_type != GlanceData.LOZENGE_EMPTY
+        return self.lozenge_type != GlanceUpdate.LOZENGE_EMPTY
 
     @property
     def has_icon(self):
@@ -553,7 +560,7 @@ class GlanceData(models.Model):
         return self.metadata not in (None, '')
 
     def save(self, *args, **kwargs):
-        super(GlanceData, self).save(*args, **kwargs)
+        super(GlanceUpdate, self).save(*args, **kwargs)
         return self
 
     def label(self):
