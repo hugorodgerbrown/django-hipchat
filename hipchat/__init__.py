@@ -230,47 +230,40 @@ class LogHandler(logging.Handler):
             message_format='html'
         )
 
+
 # ================================================
 # Colour specific helper functions
 # ================================================
-def _color(message, color):
+def _color(room, message, color):
     """Helper that wraps up sending a colorised room message."""
-    room = settings.HIPCHAT_INFO_ROOM
-    try:
-        return send_room_message(room, message, color=color)
-    except AssertionError:
-        logger.debug("HipChat message (no room specified): %s", message)
-
-def yellow(message, *args):
-    """Send a yellow message to HIPCHAT_INFO_ROOM."""
-    return _color(message % args, 'yellow')
+    return send_room_message(room, message, color=color)
 
 
-def gray(message, *args):
-    """Send a gray message to HIPCHAT_INFO_ROOM."""
-    return _color(message % args, 'gray')
+def yellow(room, message, *args):
+    """Send a yellow message."""
+    return _color(room, message % args, 'yellow')
 
 
-def grey(message, *args):
-    """Send a gray message to HIPCHAT_INFO_ROOM.
-
-    This function is the same as 'gray', but spelt correctly. Useful
-    for handling misspellings.
-
-    """
-    return _color(message % args, 'gray')
+def gray(room, message, *args):
+    """Send a gray message."""
+    return _color(room, message % args, 'gray')
 
 
-def green(message, *args):
-    """Send a green message to HIPCHAT_INFO_ROOM."""
-    return _color(message % args, 'green')
+def grey(room, message, *args):
+    """Send a gray message."""
+    return _color(room, message % args, 'gray')
 
 
-def purple(message, *args):
-    """Send a purple message to HIPCHAT_INFO_ROOM."""
-    return _color(message % args, 'purple')
+def green(room, message, *args):
+    """Send a green message."""
+    return _color(room, message % args, 'green')
 
 
-def red(message, *args):
-    """Send a red message to HIPCHAT_INFO_ROOM."""
-    return _color(message % args, 'red')
+def purple(room, message, *args):
+    """Send a purple message."""
+    return _color(room, message % args, 'purple')
+
+
+def red(room, message, *args):
+    """Send a red message."""
+    return _color(room, message % args, 'red')
