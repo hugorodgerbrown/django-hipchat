@@ -90,6 +90,7 @@ class AccessTokenAdmin(admin.ModelAdmin):
         'expires_at',
         'has_expired'
     )
+    list_filter = ('app', 'group_name', 'expires_at')
     readonly_fields = (
         'app',
         'install',
@@ -110,6 +111,7 @@ class GlanceAdmin(DescriptorMixin, admin.ModelAdmin):
         'app',
         'key',
         'name',
+        'target'
     )
     readonly_fields = ('pretty_descriptor',)
 
