@@ -5,6 +5,7 @@ https://ecosystem.atlassian.net/wiki/display/HIPDEV/Server-side+installation+flo
 
 """
 import datetime
+import json
 import logging
 from urlparse import urljoin
 
@@ -202,7 +203,7 @@ class Addon(models.Model):
             },
         }
         if self.glances.exists():
-            descriptor["glance"] = [g.descriptor() for g in self.glances.all()]
+            descriptor["capabilities"]["glance"] = [g.descriptor() for g in self.glances.all()]
         return descriptor
 
     def save(self, *args, **kwargs):
@@ -596,3 +597,22 @@ class GlanceUpdate(models.Model):
         if self.has_metadata:
             content['metadata'] = self.metadata
         return content
+
+    def update_room(self, glance_key, room_id, access_token):
+        """POST glance contents to HipChat."""
+        url = (
+            "https://api.hipchat.com/v2/addon/ui/room/%s?auth_token=%s" %
+            (room_id, access_token)
+        )
+        data = {
+            'glance': [
+                {
+                    'content': self.content(),
+                    'key': glance_key
+                }
+            ]
+        }
+        print json.dumps(data, indent=4)
+        headers = {'Content-Type': 'application/json'}
+        resp = requests.post(url, json=data, headers=headers)
+        print resp.status_code

@@ -1,6 +1,7 @@
 # -*- coding:utf-8 -*-
 """net_promoter_score views."""
 import json
+import jwt
 import logging
 
 from django.db import IntegrityError
@@ -36,6 +37,8 @@ def install(request, app_id):
     """
     app = get_object_or_404(Addon, id=app_id)
     data = json.loads(request.body)
+    logger.debug("Install data received from HipChat:")
+    logger.debug(json.dumps(data, indent=4))
     try:
         install = Install(app=app).parse_json(data).save()
         token = install.get_access_token()
@@ -75,7 +78,8 @@ def glance(request, glance_id):
     https://ecosystem.atlassian.net/wiki/display/HIPDEV/HipChat+Glances
 
     """
-    print 'glance request', request
+    logging.debug('Initial request to load glance: %s', glance_id)
+    access_token = validate_jwt_token(request.GET['signed_request'])
     glance = get_object_or_404(Glance, id=glance_id)
     # this returns a list of 2-tuples (receiver, response)
     data = glance_data_requested.send(sender=None, glance=glance)
@@ -85,11 +89,47 @@ def glance(request, glance_id):
         update = GlanceUpdate(
             glance=glance,
             label_value="Briefs",
-            lozenge_type=GlanceUpdate.LOZENGE_DEFAULT
+            lozenge_type=GlanceUpdate.LOZENGE_DEFAULT,
+            lozenge_value="Initialising"
         )
     else:
         # return the response from the first signal receiver
         update = data[0][1]
-
+        update.update_room('briefs', 79869, 'eLjV509uUbkpOppc62pXjJHqvJARt1H0FOO4LYDQ')
     update.save()
-    return JsonResponse(update.content(), status=200)
+    response = JsonResponse(update.content(), status=200)
+    response['Access-Control-Allow-Origin'] = '*'
+    return response
+
+
+def validate_jwt_token(jwt_data):
+    """Validate that the JWT token matches the install.
+
+    Returns a access_token related to the install.
+
+    """
+    # code taken from docs:
+    # https://ecosystem.atlassian.net/wiki/display/HIPDEV/HipChat+Glances
+    try:
+        oauth_id = jwt.decode(jwt_data, verify=False)['iss']
+        client = Install.objects.get(oauth_id=oauth_id)
+        data = jwt.decode(jwt_data, client.oauth_secret)
+        return client.accesstoken_set.first()
+    except jwt.exceptions.DecodeError:
+        logger.exception("Unable to decode JWT token")
+        raise Exception()
+
+
+# ----- experimental ---------------
+from django.dispatch import receiver
+from hipchat.signals import glance_data_requested
+@receiver(glance_data_requested)
+def send_initial_data(sender, **kwargs):
+    glance = kwargs['glance']
+    update = GlanceUpdate(
+        glance=glance,
+        label_value="Briefs",
+        lozenge_type=GlanceUpdate.LOZENGE_DEFAULT,
+        lozenge_value="Initialising"
+    )
+    return update

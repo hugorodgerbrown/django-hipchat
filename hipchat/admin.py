@@ -24,6 +24,16 @@ class DescriptorMixin(object):
     pretty_descriptor.short_description = "Descriptor (formatted)"
 
 
+class GlanceInline(admin.StackedInline):
+
+    """Inline admin for viewing / adding Addon glances."""
+
+    model = Glance
+    show_change_link = True
+    min_num = 0
+    max_num = 1
+
+
 class AddonAdmin(DescriptorMixin, admin.ModelAdmin):
 
     """Admin model for Addon objects."""
@@ -37,6 +47,8 @@ class AddonAdmin(DescriptorMixin, admin.ModelAdmin):
         'install_link'
     )
     readonly_fields = ('pretty_descriptor',)
+    inlines = (GlanceInline,)
+
 
     def install_link(self, obj):
         """Return link to install direct."""
@@ -65,6 +77,7 @@ class InstallAdmin(admin.ModelAdmin):
         'app',
         'group_id',
         'room_id',
+        'oauth_short'
     )
     readonly_fields = (
         'app',
@@ -75,6 +88,10 @@ class InstallAdmin(admin.ModelAdmin):
         'installed_at'
     )
     actions = (get_access_tokens,)
+
+    def oauth_short(self, obj):
+        return obj.oauth_id[:8]
+    oauth_short.short_description = "OAuth Id (truncated)"
 
 
 class AccessTokenAdmin(admin.ModelAdmin):
