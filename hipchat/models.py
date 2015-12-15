@@ -4,6 +4,7 @@
 https://ecosystem.atlassian.net/wiki/display/HIPDEV/Server-side+installation+flow
 
 """
+from collections import namedtuple
 import datetime
 import json
 import logging
@@ -21,6 +22,16 @@ from django.utils.timezone import now as tz_now
 SCHEME = "https://" if getattr(settings, 'USE_SSL', True) else "http://"
 
 logger = logging.getLogger(__name__)
+
+
+LOZENGE_EMPTY = 'empty'
+LOZENGE_DEFAULT = 'default'
+LOZENGE_SUCCESS = 'success'
+LOZENGE_CURRENT = 'current'
+LOZENGE_COMPLETE = 'complete'
+LOZENGE_ERROR = 'error'
+LOZENGE_NEW = 'new'
+LOZENGE_MOVED = 'moved'
 
 
 def get_domain():
@@ -408,6 +419,11 @@ class AccessToken(models.Model):
         return self
 
 
+# containers for the lozenge, icon tuple data structures
+Lozenge = namedtuple('Lozenge', ['type', 'value'])
+Icon = namedtuple('Icon', ['url', 'url2'])
+
+
 class Glance(models.Model):
 
     """HipChat glance descriptor."""
@@ -482,6 +498,145 @@ class Glance(models.Model):
             }
         }
 
+    def _update(self, url, access_token, update):
+        """POST glance update to the API."""
+        data = {
+            'glance': [
+                {
+                    'content': update.content(),
+                    'key': self.key
+                }
+            ]
+        }
+        print "status", update.status()
+        print "label", update.label()
+        print "content", update.content()
+        from hipchat.api import post_json
+        print post_json(url, access_token, data)
+
+    def update_global(self, access_token, label,
+                      lozenge=None, icons=None):
+        """POST global update to the glance (all users, rooms).
+
+        Args:
+            access_token: string, the API access token
+            label: string, the glance label text
+
+        Kwargs:
+            lozenge: a Lozenge tuple, if this update is altering the lozenge
+            icon: an Icon tuple, if this update is altering the icon
+
+        Returns a GlanceUpdate object.
+
+        """
+        url = "https://api.hipchat.com/v2/addon/ui"
+        update = GlanceUpdate(
+            glance=self,
+            label_value=label,
+            lozenge=lozenge or Lozenge(LOZENGE_EMPTY, ''),
+            icons=icons or Icon('', '')
+        )
+        return self._update(url, access_token, update)
+
+    # def update(self, access_token, label,
+    #            lozenge=None,
+    #            icons=None,
+    #            room_id=None,
+    #            user_id=None):
+    #     """POST glance update to HipChat.
+
+    #     Glance updates can be global, per room, per user, or
+    #     per user + room. This method is the universal update, but
+    #     there are also sepcific update methods that are less
+    #     ambiguous.
+
+    #     Args:
+    #         access_token: string, the API access token
+    #         label: string, the glance label text
+
+    #     Kwargs:
+    #         lozenge: a Lozenge tuple, if this update is altering the lozenge
+    #         icon: an Icon tuple, if this update is altering the icon
+    #         room_id: string, the id / name of the HipChat room to alert
+    #         user_id: string, the id / name of the HipChat user to alert
+
+    #     Returns a GlanceUpdate object.
+
+    #     """
+    #     print "lozenge", lozenge
+    #     print "icons", icons
+
+    #     update = GlanceUpdate(
+    #         glance=self,
+    #         label_value=label,
+    #         lozenge=lozenge or Lozenge(LOZENGE_EMPTY, ''),
+    #         icons=icons or Icon('', '')
+    #     )
+    #     print "status", update.status()
+    #     print "label", update.label()
+    #     print "content", update.content()
+    #     url = "https://api.hipchat.com/v2/addon/ui/room/%s?auth_token=%s" % (room_id, access_token)  # noqa
+    #     print "url", url
+    #     data = {'glance': [{'content': update.content(), 'key': self.key}]}
+    #     logger.debug("POSTing glance update to '%s': %s", url, json.dumps(data, indent=4))  # noqa
+    #     headers = {'Content-Type': 'application/json'}
+    #     resp = requests.post(url, json=data, headers=headers)
+    #     if resp.status_code == 204:
+    #         return update.save()
+    #     else:
+    #         logger.error("Glance update POST failed: %s", resp.json())
+    #         return None
+
+    def update_room(self, room_id, access_token, label,
+                    lozenge=None, icons=None):
+        """POST glance update to a specific room.
+
+        Args:
+            access_token: string, the API access token
+            room_id: string, the id / name of the HipChat room to alert
+            label: string, the glance label text
+
+        Kwargs:
+            lozenge: a Lozenge tuple, if this update is altering the lozenge
+            icon: an Icon tuple, if this update is altering the icon
+
+        Returns a GlanceUpdate object.
+
+        """
+        url = "https://api.hipchat.com/v2/addon/ui/room/%s" % room_id
+        update = GlanceUpdate(
+            glance=self,
+            label_value=label,
+            lozenge=lozenge or Lozenge(LOZENGE_EMPTY, ''),
+            icons=icons or Icon('', '')
+        )
+        return self._update(url, access_token, update)
+
+    def update_user(self, user_id, access_token, label,
+                    lozenge=None, icons=None):
+        """POST glance update to a specific user.
+
+        Args:
+            access_token: string, the API access token
+            user_id: string, the id / name of the HipChat user to alert
+            label: string, the glance label text
+
+        Kwargs:
+            lozenge: a Lozenge tuple, if this update is altering the lozenge
+            icon: an Icon tuple, if this update is altering the icon
+
+        Returns a GlanceUpdate object.
+
+        """
+        url = "https://api.hipchat.com/v2/addon/ui/user/%s" % user_id
+        update = GlanceUpdate(
+            glance=self,
+            label_value=label,
+            lozenge=lozenge or Lozenge(LOZENGE_EMPTY, ''),
+            icons=icons or Icon('', '')
+        )
+        return self._update(url, access_token, update)
+
 
 class GlanceUpdate(models.Model):
 
@@ -494,16 +649,6 @@ class GlanceUpdate(models.Model):
     https://ecosystem.atlassian.net/wiki/display/HIPDEV/HipChat+Glances
 
     """
-
-    LOZENGE_EMPTY = 'empty'
-    LOZENGE_DEFAULT = 'default'
-    LOZENGE_SUCCESS = 'success'
-    LOZENGE_CURRENT = 'current'
-    LOZENGE_COMPLETE = 'complete'
-    LOZENGE_ERROR = 'error'
-    LOZENGE_NEW = 'new'
-    LOZENGE_MOVED = 'moved'
-
     LOZENGE_CHOICES = (
         (LOZENGE_EMPTY, 'no lozenge'),
         (LOZENGE_DEFAULT, 'default'),
@@ -548,9 +693,31 @@ class GlanceUpdate(models.Model):
         help_text="Arbitrary JSON sent as the metadata value."
     )
 
+    def __init__(self, *args, **kwargs):
+        """Initialise using Lozenge and Icon tuples."""
+        if 'lozenge' in kwargs:
+            lozenge = kwargs.pop('lozenge', Lozenge(LOZENGE_EMPTY, ''))
+            kwargs['lozenge_type'] = lozenge.type
+            kwargs['lozenge_value'] = lozenge.value
+        if 'icons' in kwargs:
+            icons = kwargs.pop('icons', Icon('', ''))
+            kwargs['icon_url'] = icons.url
+            kwargs['icon_url2'] = icons.url2
+        super(GlanceUpdate, self).__init__(*args, **kwargs)
+
+    @property
+    def lozenge(self):
+        """Return lozenge attrs as Lozenge namedtuple."""
+        return Lozenge(self.lozenge_type, self.lozenge_value)
+
     @property
     def has_lozenge(self):
-        return self.lozenge_type != GlanceUpdate.LOZENGE_EMPTY
+        return self.lozenge_type != LOZENGE_EMPTY
+
+    @property
+    def icons(self):
+        """Return icon attrs as Icon namedtuple."""
+        return Icon(self.icon_url, self.icon_url2)
 
     @property
     def has_icon(self):
@@ -594,25 +761,8 @@ class GlanceUpdate(models.Model):
             'status': self.status(),
             'label': self.label(),
         }
+        if content['status'] == {}:
+            del content['status']
         if self.has_metadata:
             content['metadata'] = self.metadata
         return content
-
-    def update_room(self, glance_key, room_id, access_token):
-        """POST glance contents to HipChat."""
-        url = (
-            "https://api.hipchat.com/v2/addon/ui/room/%s?auth_token=%s" %
-            (room_id, access_token)
-        )
-        data = {
-            'glance': [
-                {
-                    'content': self.content(),
-                    'key': glance_key
-                }
-            ]
-        }
-        print json.dumps(data, indent=4)
-        headers = {'Content-Type': 'application/json'}
-        resp = requests.post(url, json=data, headers=headers)
-        print resp.status_code
