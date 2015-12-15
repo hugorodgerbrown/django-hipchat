@@ -315,6 +315,7 @@ class Install(models.Model):
 
         """
         token_data = request_access_token(self)
+        logger.debug("Access token data: %s", json.dumps(token_data, indent=4))
         token = AccessToken(app=self.app, install=self)
         token.parse_json(token_data)
         return token.save()
