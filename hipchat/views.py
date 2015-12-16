@@ -10,7 +10,7 @@ from django.shortcuts import get_object_or_404
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
-from hipchat.models import Addon, Install, Glance, GlanceUpdate
+from hipchat.models import Addon, Install, Glance, GlanceUpdate, LOZENGE_DEFAULT
 from hipchat.signals import glance_data_requested
 
 logger = logging.getLogger(__name__)
@@ -79,7 +79,7 @@ def glance(request, glance_id):
 
     """
     logging.debug('Initial request to load glance: %s', glance_id)
-    access_token = validate_jwt_token(request.GET['signed_request'])
+    access_token = validate_jwt_token(request)
     glance = get_object_or_404(Glance, id=glance_id)
     # this returns a list of 2-tuples (receiver, response)
     data = glance_data_requested.send(sender=None, glance=glance)
@@ -89,8 +89,7 @@ def glance(request, glance_id):
         update = GlanceUpdate(
             glance=glance,
             label_value="Briefs",
-            lozenge_type=GlanceUpdate.LOZENGE_DEFAULT,
-            lozenge_value="Initialising"
+            lozenge=(LOZENGE_DEFAULT, "Initialising")
         )
     else:
         # return the response from the first signal receiver
@@ -102,7 +101,7 @@ def glance(request, glance_id):
     return response
 
 
-def validate_jwt_token(jwt_data):
+def validate_jwt_token(request):
     """Validate that the JWT token matches the install.
 
     Returns a access_token related to the install.
@@ -110,6 +109,7 @@ def validate_jwt_token(jwt_data):
     """
     # code taken from docs:
     # https://ecosystem.atlassian.net/wiki/display/HIPDEV/HipChat+Glances
+    jwt_data = request.GET['signed_request']
     try:
         oauth_id = jwt.decode(jwt_data, verify=False)['iss']
         client = Install.objects.get(oauth_id=oauth_id)

@@ -18,6 +18,8 @@ from hipchat.models import (
     get_domain,
     request_access_token,
     SCHEME,
+    LOZENGE_EMPTY,
+    LOZENGE_DEFAULT,
     tz_now
 )
 
@@ -163,7 +165,8 @@ class AddonTests(TransactionTestCase):
 
         glance = Glance(app=app, key='key').save()
         app.glances.add(glance)
-        self.assertEqual(app.descriptor()['glance'], [glance.descriptor()])
+        capabilities = app.descriptor()['capabilities']
+        self.assertEqual(capabilities['glance'], [glance.descriptor()])
 
 
 class ScopeTests(TransactionTestCase):
@@ -374,11 +377,11 @@ class GlanceUpdateTests(TransactionTestCase):
 
     def test_has_lozenge(self):
         obj = GlanceUpdate(glance=self.glance)
-        self.assertEqual(obj.lozenge_type, GlanceUpdate.LOZENGE_EMPTY)
+        self.assertEqual(obj.lozenge_type, LOZENGE_EMPTY)
         self.assertFalse(obj.has_lozenge)
         for choice in GlanceUpdate.LOZENGE_CHOICES:
             obj.lozenge_type = choice
-            self.assertEqual(obj.has_lozenge, choice != GlanceUpdate.LOZENGE_EMPTY)
+            self.assertEqual(obj.has_lozenge, choice != LOZENGE_EMPTY)
 
     def test_has_icon(self):
         obj = GlanceUpdate(glance=self.glance)
@@ -412,7 +415,7 @@ class GlanceUpdateTests(TransactionTestCase):
 
     def test_status(self):
         obj = GlanceUpdate(
-            lozenge_type=GlanceUpdate.LOZENGE_DEFAULT,
+            lozenge_type=LOZENGE_DEFAULT,
             lozenge_value="foo",
         )
         status = obj.status()
@@ -420,13 +423,13 @@ class GlanceUpdateTests(TransactionTestCase):
         self.assertEqual(
             status['value'],
             {
-                'type': GlanceUpdate.LOZENGE_DEFAULT,
+                'type': LOZENGE_DEFAULT,
                 'label': "foo"
             }
         )
 
         # now try with an icon
-        obj.lozenge_type = GlanceUpdate.LOZENGE_EMPTY
+        obj.lozenge_type = LOZENGE_EMPTY
         obj.icon_url = "www"
         obj.icon_url2 = "xyz"
         self.assertEqual(obj.status()['type'], 'icon')
@@ -443,7 +446,7 @@ class GlanceUpdateTests(TransactionTestCase):
 
     def test_metadata(self):
         obj = GlanceUpdate(
-            lozenge_type=GlanceUpdate.LOZENGE_DEFAULT,
+            lozenge_type=LOZENGE_DEFAULT,
             lozenge_value="foo",
         )
         self.assertEqual(

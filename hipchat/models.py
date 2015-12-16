@@ -17,6 +17,7 @@ from django.db import models
 from django.conf import settings
 from django.contrib.sites.models import Site
 from django.core.urlresolvers import reverse
+from django.core.cache import cache
 from django.utils.timezone import now as tz_now
 
 SCHEME = "https://" if getattr(settings, 'USE_SSL', True) else "http://"
@@ -248,15 +249,41 @@ class Install(models.Model):
     )
     group_id = models.IntegerField(
         blank=True,
-        help_text="Value returned from the app install postback."
+        help_text="The Id of the group (company) HipChat account."
     )
     room_id = models.IntegerField(
         blank=True, null=True,
-        help_text="Value returned from the app install postback."
+        help_text="The id of the room into which the app was installed (blank if global)."
+    )
+    # and these attrs are set during the token request exchange
+    access_token = models.CharField(
+        max_length=40,
+        help_text="API access token used to authenticate future requests.",
+        blank=True,
+        unique=True,
+        db_index=True
+    )
+    group_name = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text="The name of the group (company) HipChat account."
+    )
+    scope = models.CharField(
+        max_length=500,
+        blank=True,
+        help_text="A space-delimited list of scopes that this token is allowed to use."
+    )
+    expires_at = models.DateTimeField(
+        blank=True, null=True,
+        help_text="The datetime at which this token will expire."
     )
     installed_at = models.DateTimeField(
-        help_text="Timestamp set when the app is installed."
+        help_text="Set when the object is created (post-installation)."
     )
+    last_updated_at = models.DateTimeField(
+        help_text="Set when the object is updated.")
+    # included for API completeness only
+    token_type = 'bearer'
 
     def __unicode__(self):
         return u"%s" % (self.oauth_id.split('-')[0])
@@ -268,7 +295,8 @@ class Install(models.Model):
         return u"<Install id=%s app=%s>" % (self.id, self.app.id)
 
     def save(self, *args, **kwargs):
-        self.installed_at = self.installed_at or tz_now()
+        self.last_updated_at = tz_now()
+        self.installed_at = self.installed_at or self.last_updated_at
         super(Install, self).save(*args, **kwargs)
         return self
 
@@ -289,95 +317,34 @@ class Install(models.Model):
             "roomId": "1234"
         }
 
+        The JSON response from the auth token request looks like this:
+
+        {
+          access_token: '5236346233724572457245gdgreyt345yreg',
+          expires_in: 431999999,
+          group_id: 123,
+          group_name: 'Example Company',
+          scope: 'send_notification',
+          token_type: 'bearer'
+        }
+
         NB this method doesn't save the object.
 
         """
-        self.oauth_id = json_data['oauthId']
-        self.oauth_secret = json_data['oauthSecret']
-        self.group_id = json_data['groupId']
-        if 'roomId' in json_data:
-            self.room_id = int(json_data['roomId'])
-        return self
+        def extract(json_key, attr_name, func=lambda x: x):
+            if json_key in json_data:
+                setattr(self, attr_name, func(json_data[json_key]))
 
-    def token_request_data(self):
-        """Return JSON data for POSTing to token request API."""
-        return {
-            'grant_type': 'client_credentials',
-            'scope': self.app.scopes_as_string()
-        }
-
-    def get_access_token(self):
-        """Fetch a new access_token from HipChat for this install.
-
-        This method is used to fill in the second half of the app install
-        properties - including the access_token, which is the token used
-        when calling the HipChat API.
-
-        """
-        token_data = request_access_token(self)
-        logger.debug("Access token data: %s", json.dumps(token_data, indent=4))
-        token = AccessToken(app=self.app, install=self)
-        token.parse_json(token_data)
-        return token.save()
-
-
-class AccessToken(models.Model):
-
-    """Store specific access tokens, and their scopes."""
-
-    app = models.ForeignKey(
-        Addon,
-        help_text="None if a personal token.",
-        blank=True, null=True
-    )
-    install = models.ForeignKey(
-        Install,
-        help_text="None if a personal token.",
-        blank=True, null=True
-    )
-    group_id = models.IntegerField(
-        blank=True,
-        help_text="The HipChat group ID this token belongs to"
-    )
-    group_name = models.CharField(
-        max_length=100,
-        blank=True,
-        help_text="The HipChat group name this token belongs to."
-    )
-    access_token = models.CharField(
-        max_length=40,
-        help_text="The generated access token to use to authenticate future requests.",
-        blank=True,
-        unique=True,
-        db_index=True
-    )
-    expires_at = models.DateTimeField(
-        blank=True, null=True,
-        help_text="The datetime at which this token will expire."
-    )
-    scope = models.CharField(
-        max_length=500,
-        blank=True,
-        help_text="A space-delimited list of scopes that this token is allowed to use."
-    )
-    created_at = models.DateTimeField(
-        help_text="Set when this object is first saved."
-    )
-    # included for API completeness only
-    token_type = 'bearer'
-
-    def __unicode__(self):
-        return u"%s" % self.access_token[:6]
-
-    def __str__(self):
-        return unicode(self).encode('utf-8')
-
-    def __repr__(self):
-        return u"<AccessToken id=%s token='%s'>" % (self.id, self.access_token[:6])
-
-    def save(self, *args, **kwargs):
-        self.created_at = self.created_at or tz_now()
-        super(AccessToken, self).save(*args, **kwargs)
+        extract('oauthId', 'oauth_id')
+        extract('oauthSecret', 'oauth_secret')
+        extract('groupId', 'group_id', func=int)
+        extract('roomId', 'room_id', func=int)
+        # second lot comes from the token auth process
+        extract('access_token', 'access_token')
+        extract('group_id', 'group_id')
+        extract('group_name', 'group_name')
+        extract('scope', 'scope')
+        self.set_expiry(json_data.get('expires_in', 0))
         return self
 
     @property
@@ -393,31 +360,152 @@ class AccessToken(models.Model):
         """
         self.expires_at = tz_now() + datetime.timedelta(seconds=seconds)
 
-    def parse_json(self, json_data):
-        """Set object properties from the token API response data.
+    # def parse_json(self, json_data):
+    #     """Set object properties from the token API response data.
 
-        https://www.hipchat.com/docs/apiv2/method/generate_token
+    #     https://www.hipchat.com/docs/apiv2/method/generate_token
 
-        This is a sample:
+    #     This is a sample:
 
-        {
-          access_token: '5236346233724572457245gdgreyt345yreg',
-          expires_in: 431999999,
-          group_id: 123,
-          group_name: 'Example Company',
-          scope: 'send_notification',
-          token_type: 'bearer'
+    #     {
+    #       access_token: '5236346233724572457245gdgreyt345yreg',
+    #       expires_in: 431999999,
+    #       group_id: 123,
+    #       group_name: 'Example Company',
+    #       scope: 'send_notification',
+    #       token_type: 'bearer'
+    #     }
+
+    #     NB This method does not save the object.
+
+    #     """
+    #     self.access_token = json_data['access_token']
+    #     self.group_id = json_data['group_id']
+    #     self.group_name = json_data['group_name']
+    #     self.scope = json_data['scope']
+    #     self.set_expiry(json_data['expires_in'])
+    #     return self
+
+    def token_request_data(self):
+        """Return JSON data for POSTing to token request API."""
+        return {
+            'grant_type': 'client_credentials',
+            'scope': self.app.scopes_as_string()
         }
 
-        NB This method does not save the object.
+    def get_access_token(self, force_refresh=False):
+        """Fetch a new access_token from HipChat for this install.
+
+        This method is used to fill in the second half of the app install
+        properties - including the access_token, which is the token used
+        when calling the HipChat API.
 
         """
-        self.access_token = json_data['access_token']
-        self.group_id = json_data['group_id']
-        self.group_name = json_data['group_name']
-        self.scope = json_data['scope']
-        self.set_expiry(json_data['expires_in'])
-        return self
+
+        token_data = request_access_token(self)
+        logger.debug("Access token data: %s", json.dumps(token_data, indent=4))
+        token = AccessToken(app=self.app, install=self)
+        token.parse_json(token_data)
+        return token.save()
+
+
+# class AccessToken(models.Model):
+
+#     """Store specific access tokens, and their scopes."""
+
+#     app = models.ForeignKey(
+#         Addon,
+#         help_text="None if a personal token.",
+#         blank=True, null=True
+#     )
+#     install = models.ForeignKey(
+#         Install,
+#         help_text="None if a personal token.",
+#         blank=True, null=True
+#     )
+#     group_id = models.IntegerField(
+#         blank=True,
+#         help_text="The HipChat group ID this token belongs to"
+#     )
+#     group_name = models.CharField(
+#         max_length=100,
+#         blank=True,
+#         help_text="The HipChat group name this token belongs to."
+#     )
+#     access_token = models.CharField(
+#         max_length=40,
+#         help_text="The generated access token to use to authenticate future requests.",
+#         blank=True,
+#         unique=True,
+#         db_index=True
+#     )
+#     expires_at = models.DateTimeField(
+#         blank=True, null=True,
+#         help_text="The datetime at which this token will expire."
+#     )
+#     scope = models.CharField(
+#         max_length=500,
+#         blank=True,
+#         help_text="A space-delimited list of scopes that this token is allowed to use."
+#     )
+#     created_at = models.DateTimeField(
+#         help_text="Set when this object is first saved."
+#     )
+#     # included for API completeness only
+#     token_type = 'bearer'
+
+#     def __unicode__(self):
+#         return u"%s" % self.access_token[:6]
+
+#     def __str__(self):
+#         return unicode(self).encode('utf-8')
+
+#     def __repr__(self):
+#         return u"<AccessToken id=%s token='%s'>" % (self.id, self.access_token[:6])
+
+#     def save(self, *args, **kwargs):
+#         self.created_at = self.created_at or tz_now()
+#         super(AccessToken, self).save(*args, **kwargs)
+#         return self
+
+#     @property
+#     def has_expired(self):
+#         """Return True if the token has gone past its expiry date."""
+#         return self.expires_at is None or self.expires_at < tz_now()
+
+#     def set_expiry(self, seconds):
+#         """Set the expires_at value a number of seconds into the future.
+
+#         NB This method does *not* save the object.
+
+#         """
+#         self.expires_at = tz_now() + datetime.timedelta(seconds=seconds)
+
+#     def parse_json(self, json_data):
+#         """Set object properties from the token API response data.
+
+#         https://www.hipchat.com/docs/apiv2/method/generate_token
+
+#         This is a sample:
+
+#         {
+#           access_token: '5236346233724572457245gdgreyt345yreg',
+#           expires_in: 431999999,
+#           group_id: 123,
+#           group_name: 'Example Company',
+#           scope: 'send_notification',
+#           token_type: 'bearer'
+#         }
+
+#         NB This method does not save the object.
+
+#         """
+#         self.access_token = json_data['access_token']
+#         self.group_id = json_data['group_id']
+#         self.group_name = json_data['group_name']
+#         self.scope = json_data['scope']
+#         self.set_expiry(json_data['expires_in'])
+#         return self
 
 
 # containers for the lozenge, icon tuple data structures
