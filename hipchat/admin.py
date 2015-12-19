@@ -4,7 +4,7 @@ import json
 from django.contrib import admin
 from django.utils.safestring import mark_safe
 
-from hipchat.models import Addon, Install, AccessToken, Glance, GlanceUpdate
+from hipchat.models import Addon, Install, Glance, GlanceUpdate
 
 
 class DescriptorMixin(object):
@@ -48,7 +48,6 @@ class AddonAdmin(DescriptorMixin, admin.ModelAdmin):
     )
     readonly_fields = ('pretty_descriptor',)
     inlines = (GlanceInline,)
-
 
     def install_link(self, obj):
         """Return link to install direct."""
@@ -94,32 +93,6 @@ class InstallAdmin(admin.ModelAdmin):
     oauth_short.short_description = "OAuth Id (truncated)"
 
 
-class AccessTokenAdmin(admin.ModelAdmin):
-
-    """Admin model of AccessToken objects."""
-
-    list_display = (
-        'app',
-        'install',
-        'access_token',
-        'group_name',
-        'scope',
-        'expires_at',
-        'has_expired'
-    )
-    list_filter = ('app', 'group_name', 'expires_at')
-    readonly_fields = (
-        'app',
-        'install',
-        'group_id',
-        'group_name',
-        'access_token',
-        'expires_at',
-        'created_at',
-        'scope',
-    )
-
-
 class GlanceAdmin(DescriptorMixin, admin.ModelAdmin):
 
     """Admin model of Glance objects."""
@@ -139,7 +112,7 @@ class GlanceUpdateAdmin(admin.ModelAdmin):
 
     list_display = (
         'glance',
-        'label_value',
+        'label',
         'lozenge',
         'icon'
     )
@@ -157,8 +130,8 @@ class GlanceUpdateAdmin(admin.ModelAdmin):
         else:
             return None
 
+
 admin.site.register(Addon, AddonAdmin)
 admin.site.register(Install, InstallAdmin)
-admin.site.register(AccessToken, AccessTokenAdmin)
 admin.site.register(Glance, GlanceAdmin)
 admin.site.register(GlanceUpdate, GlanceUpdateAdmin)

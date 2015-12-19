@@ -360,32 +360,6 @@ class Install(models.Model):
         """
         self.expires_at = tz_now() + datetime.timedelta(seconds=seconds)
 
-    # def parse_json(self, json_data):
-    #     """Set object properties from the token API response data.
-
-    #     https://www.hipchat.com/docs/apiv2/method/generate_token
-
-    #     This is a sample:
-
-    #     {
-    #       access_token: '5236346233724572457245gdgreyt345yreg',
-    #       expires_in: 431999999,
-    #       group_id: 123,
-    #       group_name: 'Example Company',
-    #       scope: 'send_notification',
-    #       token_type: 'bearer'
-    #     }
-
-    #     NB This method does not save the object.
-
-    #     """
-    #     self.access_token = json_data['access_token']
-    #     self.group_id = json_data['group_id']
-    #     self.group_name = json_data['group_name']
-    #     self.scope = json_data['scope']
-    #     self.set_expiry(json_data['expires_in'])
-    #     return self
-
     def token_request_data(self):
         """Return JSON data for POSTing to token request API."""
         return {
@@ -404,108 +378,8 @@ class Install(models.Model):
 
         token_data = request_access_token(self)
         logger.debug("Access token data: %s", json.dumps(token_data, indent=4))
-        token = AccessToken(app=self.app, install=self)
-        token.parse_json(token_data)
-        return token.save()
-
-
-# class AccessToken(models.Model):
-
-#     """Store specific access tokens, and their scopes."""
-
-#     app = models.ForeignKey(
-#         Addon,
-#         help_text="None if a personal token.",
-#         blank=True, null=True
-#     )
-#     install = models.ForeignKey(
-#         Install,
-#         help_text="None if a personal token.",
-#         blank=True, null=True
-#     )
-#     group_id = models.IntegerField(
-#         blank=True,
-#         help_text="The HipChat group ID this token belongs to"
-#     )
-#     group_name = models.CharField(
-#         max_length=100,
-#         blank=True,
-#         help_text="The HipChat group name this token belongs to."
-#     )
-#     access_token = models.CharField(
-#         max_length=40,
-#         help_text="The generated access token to use to authenticate future requests.",
-#         blank=True,
-#         unique=True,
-#         db_index=True
-#     )
-#     expires_at = models.DateTimeField(
-#         blank=True, null=True,
-#         help_text="The datetime at which this token will expire."
-#     )
-#     scope = models.CharField(
-#         max_length=500,
-#         blank=True,
-#         help_text="A space-delimited list of scopes that this token is allowed to use."
-#     )
-#     created_at = models.DateTimeField(
-#         help_text="Set when this object is first saved."
-#     )
-#     # included for API completeness only
-#     token_type = 'bearer'
-
-#     def __unicode__(self):
-#         return u"%s" % self.access_token[:6]
-
-#     def __str__(self):
-#         return unicode(self).encode('utf-8')
-
-#     def __repr__(self):
-#         return u"<AccessToken id=%s token='%s'>" % (self.id, self.access_token[:6])
-
-#     def save(self, *args, **kwargs):
-#         self.created_at = self.created_at or tz_now()
-#         super(AccessToken, self).save(*args, **kwargs)
-#         return self
-
-#     @property
-#     def has_expired(self):
-#         """Return True if the token has gone past its expiry date."""
-#         return self.expires_at is None or self.expires_at < tz_now()
-
-#     def set_expiry(self, seconds):
-#         """Set the expires_at value a number of seconds into the future.
-
-#         NB This method does *not* save the object.
-
-#         """
-#         self.expires_at = tz_now() + datetime.timedelta(seconds=seconds)
-
-#     def parse_json(self, json_data):
-#         """Set object properties from the token API response data.
-
-#         https://www.hipchat.com/docs/apiv2/method/generate_token
-
-#         This is a sample:
-
-#         {
-#           access_token: '5236346233724572457245gdgreyt345yreg',
-#           expires_in: 431999999,
-#           group_id: 123,
-#           group_name: 'Example Company',
-#           scope: 'send_notification',
-#           token_type: 'bearer'
-#         }
-
-#         NB This method does not save the object.
-
-#         """
-#         self.access_token = json_data['access_token']
-#         self.group_id = json_data['group_id']
-#         self.group_name = json_data['group_name']
-#         self.scope = json_data['scope']
-#         self.set_expiry(json_data['expires_in'])
-#         return self
+        self.parse_json(token_data)
+        return self.save()
 
 
 # containers for the lozenge, icon tuple data structures
@@ -601,14 +475,13 @@ class Glance(models.Model):
         print "label", update.label()
         print "content", update.content()
         from hipchat.api import post_json
-        print post_json(url, access_token, data)
+        print post_json(url, self.access_token, data)
 
-    def update_global(self, access_token, label,
+    def update_global(self, label,
                       lozenge=None, icons=None):
         """POST global update to the glance (all users, rooms).
 
         Args:
-            access_token: string, the API access token
             label: string, the glance label text
 
         Kwargs:
@@ -625,63 +498,13 @@ class Glance(models.Model):
             lozenge=lozenge or Lozenge(LOZENGE_EMPTY, ''),
             icons=icons or Icon('', '')
         )
-        return self._update(url, access_token, update)
+        return self._update(url, update)
 
-    # def update(self, access_token, label,
-    #            lozenge=None,
-    #            icons=None,
-    #            room_id=None,
-    #            user_id=None):
-    #     """POST glance update to HipChat.
-
-    #     Glance updates can be global, per room, per user, or
-    #     per user + room. This method is the universal update, but
-    #     there are also sepcific update methods that are less
-    #     ambiguous.
-
-    #     Args:
-    #         access_token: string, the API access token
-    #         label: string, the glance label text
-
-    #     Kwargs:
-    #         lozenge: a Lozenge tuple, if this update is altering the lozenge
-    #         icon: an Icon tuple, if this update is altering the icon
-    #         room_id: string, the id / name of the HipChat room to alert
-    #         user_id: string, the id / name of the HipChat user to alert
-
-    #     Returns a GlanceUpdate object.
-
-    #     """
-    #     print "lozenge", lozenge
-    #     print "icons", icons
-
-    #     update = GlanceUpdate(
-    #         glance=self,
-    #         label_value=label,
-    #         lozenge=lozenge or Lozenge(LOZENGE_EMPTY, ''),
-    #         icons=icons or Icon('', '')
-    #     )
-    #     print "status", update.status()
-    #     print "label", update.label()
-    #     print "content", update.content()
-    #     url = "https://api.hipchat.com/v2/addon/ui/room/%s?auth_token=%s" % (room_id, access_token)  # noqa
-    #     print "url", url
-    #     data = {'glance': [{'content': update.content(), 'key': self.key}]}
-    #     logger.debug("POSTing glance update to '%s': %s", url, json.dumps(data, indent=4))  # noqa
-    #     headers = {'Content-Type': 'application/json'}
-    #     resp = requests.post(url, json=data, headers=headers)
-    #     if resp.status_code == 204:
-    #         return update.save()
-    #     else:
-    #         logger.error("Glance update POST failed: %s", resp.json())
-    #         return None
-
-    def update_room(self, room_id, access_token, label,
+    def update_room(self, room_id, label,
                     lozenge=None, icons=None):
         """POST glance update to a specific room.
 
         Args:
-            access_token: string, the API access token
             room_id: string, the id / name of the HipChat room to alert
             label: string, the glance label text
 
@@ -699,14 +522,13 @@ class Glance(models.Model):
             lozenge=lozenge or Lozenge(LOZENGE_EMPTY, ''),
             icons=icons or Icon('', '')
         )
-        return self._update(url, access_token, update)
+        return self._update(url, update)
 
-    def update_user(self, user_id, access_token, label,
+    def update_user(self, user_id, label,
                     lozenge=None, icons=None):
         """POST glance update to a specific user.
 
         Args:
-            access_token: string, the API access token
             user_id: string, the id / name of the HipChat user to alert
             label: string, the glance label text
 
@@ -724,7 +546,7 @@ class Glance(models.Model):
             lozenge=lozenge or Lozenge(LOZENGE_EMPTY, ''),
             icons=icons or Icon('', '')
         )
-        return self._update(url, access_token, update)
+        return self._update(url, update)
 
 
 class GlanceUpdate(models.Model):
@@ -785,6 +607,7 @@ class GlanceUpdate(models.Model):
     def __init__(self, *args, **kwargs):
         """Initialise using Lozenge and Icon tuples."""
         if 'lozenge' in kwargs:
+            logger.debug("lozenge: %s", kwargs['lozenge'])
             lozenge = kwargs.pop('lozenge', Lozenge(LOZENGE_EMPTY, ''))
             kwargs['lozenge_type'] = lozenge.type
             kwargs['lozenge_value'] = lozenge.value

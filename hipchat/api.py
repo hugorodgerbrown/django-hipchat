@@ -52,7 +52,8 @@ def post_json(url, auth_token, payload):
         auth_token: string, a valid API access token.
         payload: dict, the data to post.
 
-    Returns the response status_code.
+    Returns the response object. Raises HipChatError if response code
+    is not 2xx.
 
     """
     resp = requests.post(
@@ -62,4 +63,4 @@ def post_json(url, auth_token, payload):
     )
     if str(resp.status_code)[:1] != '2':
         raise HipChatError(resp.status_code, resp.text)
-    return resp.status_code
+    return resp
