@@ -5,7 +5,7 @@ import jwt
 import logging
 
 from django.db import IntegrityError
-from django.http import JsonResponse, HttpResponse
+from django.http import JsonResponse, HttpResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
@@ -78,6 +78,8 @@ def glance(request, glance_id):
     https://ecosystem.atlassian.net/wiki/display/HIPDEV/HipChat+Glances
 
     """
+    if 'signed_request' not in request.GET:
+        return HttpResponseForbidden("Missing signed_request")
     logging.debug('Initial request to load glance: %s', glance_id)
     validate_jwt_token(request)
     glance = get_object_or_404(models.Glance, id=glance_id)

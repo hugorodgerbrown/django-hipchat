@@ -5,7 +5,7 @@ https://ecosystem.atlassian.net/wiki/display/HIPDEV/Server-side+installation+flo
 
 """
 from collections import namedtuple
-import datetime
+# import datetime
 import json
 import logging
 from urlparse import urljoin
@@ -17,13 +17,12 @@ from django.db import models
 from django.conf import settings
 from django.contrib.sites.models import Site
 from django.core.urlresolvers import reverse
-# from django.core.cache import cache
+from django.core.cache import cache
 from django.utils.timezone import now as tz_now
 
 SCHEME = "https://" if getattr(settings, 'USE_SSL', True) else "http://"
 
 logger = logging.getLogger(__name__)
-
 
 LOZENGE_EMPTY = 'empty'
 LOZENGE_DEFAULT = 'default'
@@ -50,24 +49,10 @@ def get_full_url(path):
     return urljoin(SCHEME + get_domain(), path)
 
 
-def request_access_token(install):
-    """Request access token from API.
-
-    Pulled out as a function to allow for mocking.
-
-    Args:
-        install: an Install object for which we are requesting a token.
-
-    Returns the output from requests.post(...).json()
-
-    """
-    url = "https://api.hipchat.com/v2/oauth/token"
-    resp = requests.post(url, auth=install.http_auth(), data=install.token_request_data())
-    return resp.json()
-
-
 class NoValidAccessToken(Exception):
+
     """Exception raised when no valid API access token is available."""
+
     pass
 
 
@@ -236,7 +221,8 @@ class Install(models.Model):
     https://ecosystem.atlassian.net/wiki/display/HIPDEV/Server-side+installation+flow
 
     """
-    CACHE_KEY_MASK = "hipchat-tokens:{oauth_id}:{scopes}"
+
+    CACHE_KEY_MASK = "hipchat-tokens:{oauth_id}"
 
     app = models.ForeignKey(
         Addon,
@@ -261,35 +247,35 @@ class Install(models.Model):
         blank=True, null=True,
         help_text="The id of the room into which the app was installed (blank if global)."
     )
-    # and these attrs are set during the token request exchange
-    access_token = models.CharField(
-        max_length=40,
-        help_text="API access token used to authenticate future requests.",
-        blank=True,
-        unique=True,
-        db_index=True
-    )
-    group_name = models.CharField(
-        max_length=100,
-        blank=True,
-        help_text="The name of the group (company) HipChat account."
-    )
-    scope = models.CharField(
-        max_length=500,
-        blank=True,
-        help_text="A space-delimited list of scopes that this token is allowed to use."
-    )
-    expires_at = models.DateTimeField(
-        blank=True, null=True,
-        help_text="The datetime at which this token will expire."
-    )
+    # # and these attrs are set during the token request exchange
+    # access_token = models.CharField(
+    #     max_length=40,
+    #     help_text="API access token used to authenticate future requests.",
+    #     blank=True,
+    #     unique=True,
+    #     db_index=True
+    # )
+    # group_name = models.CharField(
+    #     max_length=100,
+    #     blank=True,
+    #     help_text="The name of the group (company) HipChat account."
+    # )
+    # scope = models.CharField(
+    #     max_length=500,
+    #     blank=True,
+    #     help_text="A space-delimited list of scopes that this token is allowed to use."
+    # )
+    # expires_at = models.DateTimeField(
+    #     blank=True, null=True,
+    #     help_text="The datetime at which this token will expire."
+    # )
     installed_at = models.DateTimeField(
         help_text="Set when the object is created (post-installation)."
     )
-    last_updated_at = models.DateTimeField(
-        help_text="Set when the object is updated.")
-    # included for API completeness only
-    token_type = 'bearer'
+    # last_updated_at = models.DateTimeField(
+    #     help_text="Set when the object is updated.")
+    # # included for API completeness only
+    # token_type = 'bearer'
 
     def __unicode__(self):
         return u"%s" % (self.oauth_id.split('-')[0])
@@ -306,9 +292,33 @@ class Install(models.Model):
         super(Install, self).save(*args, **kwargs)
         return self
 
+    @property
+    def cache_key(self):
+        """Return the objects cache key."""
+        return Install.CACHE_KEY_MASK.format(oauth_id=self.oauth_id)
+
     def http_auth(self):
         """Return HTTPBasicAuth object using oauth_id, secret."""
         return HTTPBasicAuth(self.oauth_id, self.oauth_secret)
+
+    def token_request_payload(self):
+        """Return JSON data for POSTing to token request API."""
+        return {
+            'grant_type': 'client_credentials',
+            'scope': self.app.scopes_as_string()
+        }
+
+    def request_access_token(self):
+        """Request access token from API.
+
+        Returns the output from requests.post(...).json()
+
+        """
+        url = "https://api.hipchat.com/v2/oauth/token"
+        resp = requests.post(url, auth=self.http_auth(), data=self.token_request_payload())
+        token_data = resp.json()
+        logger.debug("Access token data: %s", json.dumps(token_data, indent=4))
+        return token_data
 
     def parse_json(self, json_data):
         """Set object properties from the HipChat API callback JSON.
@@ -323,74 +333,58 @@ class Install(models.Model):
             "roomId": "1234"
         }
 
-        The JSON response from the auth token request looks like this:
-
-        {
-          access_token: '5236346233724572457245gdgreyt345yreg',
-          expires_in: 431999999,
-          group_id: 123,
-          group_name: 'Example Company',
-          scope: 'send_notification',
-          token_type: 'bearer'
-        }
-
         NB this method doesn't save the object.
 
         """
         def extract(json_key, attr_name, func=lambda x: x):
             if json_key in json_data:
                 setattr(self, attr_name, func(json_data[json_key]))
-
         extract('oauthId', 'oauth_id')
         extract('oauthSecret', 'oauth_secret')
         extract('groupId', 'group_id', func=int)
         extract('roomId', 'room_id', func=int)
-        # second lot comes from the token auth process
-        extract('access_token', 'access_token')
-        extract('group_id', 'group_id')
-        extract('group_name', 'group_name')
-        extract('scope', 'scope')
-        self.set_expiry(json_data.get('expires_in', 0))
         return self
 
-    @property
-    def has_expired(self):
-        """Return True if the token has gone past its expiry date."""
-        return self.expires_at is None or self.expires_at < tz_now()
+    def get_access_token(self, auto_refresh=True):
+        """Fetch access token from cache, refreshing from HipChat if necessary.
 
-    def set_expiry(self, seconds):
-        """Set the expires_at value a number of seconds into the future.
+        The JSON response from the auth token request looks like this:
 
-        NB This method does *not* save the object.
-
-        """
-        self.expires_at = tz_now() + datetime.timedelta(seconds=seconds)
-
-    def token_request_data(self):
-        """Return JSON data for POSTing to token request API."""
-        return {
-            'grant_type': 'client_credentials',
-            'scope': self.app.scopes_as_string()
+        {
+          'access_token': '5236346233724572457245gdgreyt345yreg',
+          'expires_in': 431999999,
+          'group_id': 123,
+          'group_name': 'Example Company',
+          'scope': 'send_notification',
+          'token_type': 'bearer'
         }
 
-    def get_access_token(self, force_refresh=False):
-        """Fetch a new access_token from HipChat for this install.
-
-        This method is used to fill in the second half of the app install
-        properties - including the access_token, which is the token used
-        when calling the HipChat API.
+        It is loaded into an AccessToken namedtuple, and cached.
 
         """
-
-        token_data = request_access_token(self)
-        logger.debug("Access token data: %s", json.dumps(token_data, indent=4))
-        self.parse_json(token_data)
-        return self.save()
+        token = cache.get(self.cache_key)
+        if token is None:
+            if auto_refresh is True:
+                token_data = self.request_access_token()
+                expires_in = token_data.get('expires_in', 0)
+                token = AccessToken(**token_data)
+                cache.set(self.cache_key, token_data, expires_in)
+                logger.debug("Fetched new access_token: %r", token)
+                return token
+            else:
+                return None
+        else:
+            logger.debug("Found cached access_token: %r", token)
+            return token
 
 
 # containers for the lozenge, icon tuple data structures
 Lozenge = namedtuple('Lozenge', ['type', 'value'])
 Icon = namedtuple('Icon', ['url', 'url2'])
+AccessToken = namedtuple(
+    'AccessToken',
+    ['access_token', 'group_id', 'group_name', 'scope', 'expires_in', 'token_type']
+)
 
 
 class Glance(models.Model):
@@ -574,6 +568,7 @@ class GlanceUpdate(models.Model):
     https://ecosystem.atlassian.net/wiki/display/HIPDEV/HipChat+Glances
 
     """
+
     LOZENGE_CHOICES = (
         (LOZENGE_EMPTY, 'no lozenge'),
         (LOZENGE_DEFAULT, 'default'),
