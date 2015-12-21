@@ -17,7 +17,7 @@ from django.db import models
 from django.conf import settings
 from django.contrib.sites.models import Site
 from django.core.urlresolvers import reverse
-from django.core.cache import cache
+# from django.core.cache import cache
 from django.utils.timezone import now as tz_now
 
 SCHEME = "https://" if getattr(settings, 'USE_SSL', True) else "http://"
@@ -64,6 +64,11 @@ def request_access_token(install):
     url = "https://api.hipchat.com/v2/oauth/token"
     resp = requests.post(url, auth=install.http_auth(), data=install.token_request_data())
     return resp.json()
+
+
+class NoValidAccessToken(Exception):
+    """Exception raised when no valid API access token is available."""
+    pass
 
 
 class Scope(models.Model):
@@ -231,6 +236,7 @@ class Install(models.Model):
     https://ecosystem.atlassian.net/wiki/display/HIPDEV/Server-side+installation+flow
 
     """
+    CACHE_KEY_MASK = "hipchat-tokens:{oauth_id}:{scopes}"
 
     app = models.ForeignKey(
         Addon,
@@ -498,7 +504,15 @@ class Glance(models.Model):
             lozenge=lozenge or Lozenge(LOZENGE_EMPTY, ''),
             icons=icons or Icon('', '')
         )
-        return self._update(url, update)
+        token = (
+            Install.objects
+            .filter(app=self.app)
+            .filter(expires_at__gt=tz_now())
+            .first()
+        )
+        if token is None:
+            raise NoValidAccessToken()
+        return self._update(url, token.access_token, update)
 
     def update_room(self, room_id, label,
                     lozenge=None, icons=None):

@@ -8,4 +8,4 @@ from django.dispatch import Signal
 # returning external data - the calling app can connect to the signal,
 # and then return a GlanceUpdate object which will be used by the view
 # as its return value.
-glance_data_requested = Signal(providing_args=['glance'])
+initialise_glance = Signal(providing_args=['glance'])

@@ -10,7 +10,8 @@ from django.shortcuts import get_object_or_404
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
-from hipchat.models import Addon, Install, Glance, GlanceUpdate, Lozenge, LOZENGE_DEFAULT
+from hipchat import models
+from hipchat import signals
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +19,7 @@ logger = logging.getLogger(__name__)
 @require_http_methods(['GET'])
 def descriptor(request, app_id):
     """Return the app descriptor JSON to HipChat."""
-    app = get_object_or_404(Addon, id=app_id)
+    app = get_object_or_404(models.Addon, id=app_id)
     return JsonResponse(app.descriptor())
 
 
@@ -34,12 +35,12 @@ def install(request, app_id):
     by HipChat (as duplicates aren't allowed).
 
     """
-    app = get_object_or_404(Addon, id=app_id)
+    app = get_object_or_404(models.Addon, id=app_id)
     data = json.loads(request.body)
     logger.debug("Install data received from HipChat:")
     logger.debug(json.dumps(data, indent=4))
     try:
-        install = Install(app=app).parse_json(data).save()
+        install = models.Install(app=app).parse_json(data).save()
         token = install.get_access_token()
         logger.debug("Successful install: %s", install)
         logger.debug("Acquired access token: %s", token)
@@ -60,7 +61,7 @@ def delete(request, app_id, oauth_id):
     a 404 if the Install doesn't exist.
 
     """
-    install = get_object_or_404(Install, app_id=app_id, oauth_id=oauth_id)
+    install = get_object_or_404(models.Install, app_id=app_id, oauth_id=oauth_id)
     install.delete()
     return HttpResponse("Sorry to see you go :-(", status=204)
 
@@ -79,18 +80,18 @@ def glance(request, glance_id):
     """
     logging.debug('Initial request to load glance: %s', glance_id)
     validate_jwt_token(request)
-    glance = get_object_or_404(Glance, id=glance_id)
+    glance = get_object_or_404(models.Glance, id=glance_id)
     # this returns a list of 2-tuples (receiver, response)
-    data = glance_data_requested.send(sender=None, glance=glance)
+    data = signals.initialise_glance.send(sender=None, glance=glance)
     # extract out responses that are Updates
-    updates = [d[1] for d in data if isinstance(d[1], GlanceUpdate)]
+    updates = [d[1] for d in data if isinstance(d[1], models.GlanceUpdate)]
     if len(updates) == 0:
         # we received the request, but there's nothing listening,
         # create an empty update
-        update = GlanceUpdate(
+        update = models.GlanceUpdate(
             glance=glance,
             label_value="Briefs",
-            lozenge=Lozenge(LOZENGE_DEFAULT, "Initialising")
+            lozenge=models.Lozenge(models.LOZENGE_DEFAULT, "Initialising")
         )
     else:
         # return the response from the first signal receiver
@@ -112,7 +113,7 @@ def validate_jwt_token(request):
     jwt_data = request.GET['signed_request']
     try:
         oauth_id = jwt.decode(jwt_data, verify=False)['iss']
-        client = Install.objects.get(oauth_id=oauth_id)
+        client = models.Install.objects.get(oauth_id=oauth_id)
         data = jwt.decode(jwt_data, client.oauth_secret)
         logger.debug("JWT signed_request data: %s", json.dumps(data, indent=4))
         return client
@@ -123,15 +124,14 @@ def validate_jwt_token(request):
 
 # ----- experimental ---------------
 from django.dispatch import receiver
-from hipchat.signals import glance_data_requested
 
 
-@receiver(glance_data_requested)
+@receiver(signals.initialise_glance)
 def send_initial_data(sender, **kwargs):
     glance = kwargs['glance']
-    update = GlanceUpdate(
+    update = models.GlanceUpdate(
         glance=glance,
         label_value="Briefs",
-        lozenge=Lozenge(LOZENGE_DEFAULT, "Signal received")
+        lozenge=models.Lozenge(models.LOZENGE_DEFAULT, "Signal received")
     )
     return update

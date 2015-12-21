@@ -112,7 +112,7 @@ class ViewTests(TransactionTestCase):
                 glance=kwargs['glance'],
             )
 
-        signals.glance_data_requested.connect(on_glance_data_request)
+        signals.initialise_glance.connect(on_glance_data_request)
 
         resp = views.glance(request, glance_id=self.glance.id)
         self.assertEqual(resp.status_code, 200)

@@ -13,13 +13,16 @@ class DescriptorMixin(object):
 
     def pretty_descriptor(self, obj):
         """Return pretty formatted version of descriptor() output."""
-        pretty = json.dumps(
-            obj.descriptor(),
-            sort_keys=True,
-            indent=4,
-            separators=(',', ': ')
-        )
-        return mark_safe("<code>%s</code>" % pretty.replace(" ", "&nbsp;"))
+        try:
+            pretty = json.dumps(
+                obj.descriptor(),
+                sort_keys=True,
+                indent=4,
+                separators=(',', ': ')
+            )
+            return mark_safe("<code>%s</code>" % pretty.replace(" ", "&nbsp;"))
+        except Exception as ex:
+            print(ex)
 
     pretty_descriptor.short_description = "Descriptor (formatted)"
 
