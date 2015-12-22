@@ -7,6 +7,19 @@ from django.utils.safestring import mark_safe
 from hipchat.models import Addon, Install, Glance, GlanceUpdate
 
 
+def pretty_print(data):
+    """Convert dict into formatted HTML."""
+    if data is None:
+        return None
+    pretty = json.dumps(
+        data,
+        sort_keys=True,
+        indent=4,
+        separators=(',', ': ')
+    )
+    return mark_safe("<code>%s</code>" % pretty.replace(" ", "&nbsp;"))
+
+
 class DescriptorMixin(object):
 
     """Provides access to pretty-formatted version of descriptor property."""
@@ -14,13 +27,7 @@ class DescriptorMixin(object):
     def pretty_descriptor(self, obj):
         """Return pretty formatted version of descriptor() output."""
         try:
-            pretty = json.dumps(
-                obj.descriptor(),
-                sort_keys=True,
-                indent=4,
-                separators=(',', ': ')
-            )
-            return mark_safe("<code>%s</code>" % pretty.replace(" ", "&nbsp;"))
+            return pretty_print(obj.descriptor())
         except Exception as ex:
             print(ex)
 
@@ -79,7 +86,8 @@ class InstallAdmin(admin.ModelAdmin):
         'app',
         'group_id',
         'room_id',
-        'oauth_short'
+        'oauth_short',
+        'has_access_token'
     )
     readonly_fields = (
         'app',
@@ -87,13 +95,22 @@ class InstallAdmin(admin.ModelAdmin):
         'oauth_secret',
         'group_id',
         'room_id',
-        'installed_at'
+        'installed_at',
+        'access_token'
     )
     actions = (get_access_tokens,)
 
     def oauth_short(self, obj):
         return obj.oauth_id[:8]
     oauth_short.short_description = "OAuth Id (truncated)"
+
+    def has_access_token(self, obj):
+        return obj.get_access_token(auto_refresh=False) is not None
+    has_access_token.short_description = "Has cached access token"
+    has_access_token.boolean = True
+
+    def access_token(self, obj):
+        return pretty_print(obj.get_access_token(auto_refresh=False))
 
 
 class GlanceAdmin(DescriptorMixin, admin.ModelAdmin):

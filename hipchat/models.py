@@ -292,6 +292,31 @@ class Install(models.Model):
         super(Install, self).save(*args, **kwargs)
         return self
 
+    def parse_json(self, json_data):
+        """Set object properties from the HipChat API callback JSON.
+
+        The callback POSTs JSON that looks like this:
+
+        {
+            "capabilitiesUrl": "https://api.hipchat.com/v2/capabilities",
+            "oauthId": "abc",
+            "oauthSecret": "xyz",
+            "groupId": 123,
+            "roomId": "1234"
+        }
+
+        NB this method doesn't save the object.
+
+        """
+        def extract(json_key, attr_name, func=lambda x: x):
+            if json_key in json_data:
+                setattr(self, attr_name, func(json_data[json_key]))
+        extract('oauthId', 'oauth_id')
+        extract('oauthSecret', 'oauth_secret')
+        extract('groupId', 'group_id', func=int)
+        extract('roomId', 'room_id', func=int)
+        return self
+
     @property
     def cache_key(self):
         """Return the objects cache key."""
@@ -320,31 +345,6 @@ class Install(models.Model):
         logger.debug("Access token data: %s", json.dumps(token_data, indent=4))
         return token_data
 
-    def parse_json(self, json_data):
-        """Set object properties from the HipChat API callback JSON.
-
-        The callback POSTs JSON that looks like this:
-
-        {
-            "capabilitiesUrl": "https://api.hipchat.com/v2/capabilities",
-            "oauthId": "abc",
-            "oauthSecret": "xyz",
-            "groupId": 123,
-            "roomId": "1234"
-        }
-
-        NB this method doesn't save the object.
-
-        """
-        def extract(json_key, attr_name, func=lambda x: x):
-            if json_key in json_data:
-                setattr(self, attr_name, func(json_data[json_key]))
-        extract('oauthId', 'oauth_id')
-        extract('oauthSecret', 'oauth_secret')
-        extract('groupId', 'group_id', func=int)
-        extract('roomId', 'room_id', func=int)
-        return self
-
     def get_access_token(self, auto_refresh=True):
         """Fetch access token from cache, refreshing from HipChat if necessary.
 
@@ -366,15 +366,19 @@ class Install(models.Model):
         if token is None:
             if auto_refresh is True:
                 token_data = self.request_access_token()
-                expires_in = token_data.get('expires_in', 0)
+                # we subtract 10 seconds from the expiry to cover latency and
+                # to ensure that our token expires before HipChat expires it
+                # at their end - this way we should never *think* we have a
+                # token when they do not.
+                expires_in = token_data.get('expires_in', 10) - 10
                 token = AccessToken(**token_data)
                 cache.set(self.cache_key, token_data, expires_in)
-                logger.debug("Fetched new access_token: %r", token)
+                logger.debug("Cached new AccessToken: %r", token)
                 return token
             else:
                 return None
         else:
-            logger.debug("Found cached access_token: %r", token)
+            logger.debug("Found cached AccessToken: %r", token)
             return token
 
 
